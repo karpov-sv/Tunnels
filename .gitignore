@@ -5,6 +5,7 @@
 *.xcodeproj
 *.xcworkspace
 *.xcuserstate
+*.xcarchive
 xcuserdata/
 
 # SwiftPM
@@ -12,3 +13,8 @@ xcuserdata/
 
 # User data
 *.swp
+
+build/
+tmp/
+
+AGENTS.md
