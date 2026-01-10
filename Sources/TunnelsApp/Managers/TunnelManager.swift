@@ -96,7 +96,15 @@ final class TunnelManager: ObservableObject {
         hostProfiles.first { $0.id == id }
     }
 
-    func runtimeState(for host: HostProfile) -> HostRuntimeState {
+    func runtimeStateSnapshot(for host: HostProfile) -> HostRuntimeState {
+        if let state = runtimeStates[host.id] {
+            return state
+        }
+        let socketPath = controlSocketManager.socketPath(for: host.alias)
+        return HostRuntimeState(controlSocketPath: socketPath, isMasterRunning: false)
+    }
+
+    private func ensureRuntimeState(for host: HostProfile) -> HostRuntimeState {
         if let state = runtimeStates[host.id] {
             return state
         }
@@ -107,7 +115,7 @@ final class TunnelManager: ObservableObject {
     }
 
     func statusLabel(for host: HostProfile) -> String {
-        let state = runtimeState(for: host)
+        let state = runtimeStateSnapshot(for: host)
         if state.isMasterRunning {
             return "Connected"
         }
@@ -307,7 +315,7 @@ final class TunnelManager: ObservableObject {
         if tunnel.type != .remote {
             let port = tunnel.localPort
             if !isLocalPortAvailable(port) {
-                let state = runtimeState(for: host)
+                let state = ensureRuntimeState(for: host)
                 let cancelArgs = ["-S", state.controlSocketPath, "-O", "cancel"]
                     + tunnelArguments(for: tunnel)
                     + [host.alias]
@@ -319,7 +327,7 @@ final class TunnelManager: ObservableObject {
                 return
             }
         }
-        let state = runtimeState(for: host)
+        let state = ensureRuntimeState(for: host)
         let args = ["-S", state.controlSocketPath, "-O", "forward"]
             + tunnelArguments(for: tunnel)
             + [host.alias]
@@ -342,7 +350,7 @@ final class TunnelManager: ObservableObject {
 
     private func stopTunnel(host: HostProfile, tunnel: TunnelSpec) async {
         logInfo("Stopping tunnel \(tunnel.displaySummary) for \(host.alias)")
-        let state = runtimeState(for: host)
+        let state = ensureRuntimeState(for: host)
         let args = ["-S", state.controlSocketPath, "-O", "cancel"]
             + tunnelArguments(for: tunnel)
             + [host.alias]
@@ -361,7 +369,7 @@ final class TunnelManager: ObservableObject {
     }
 
     private func ensureMaster(for host: HostProfile) async -> Bool {
-        let state = runtimeState(for: host)
+        let state = ensureRuntimeState(for: host)
         let check = await runSSH(args: ["-S", state.controlSocketPath, "-O", "check", host.alias])
         if check.success {
             runtimeStates[host.id]?.isMasterRunning = true
@@ -465,7 +473,7 @@ final class TunnelManager: ObservableObject {
 
     private func refreshStatus() async {
         for host in hostProfiles {
-            let state = runtimeState(for: host)
+            let state = ensureRuntimeState(for: host)
             let wasRunning = state.isMasterRunning
             let result = await runSSH(args: ["-S", state.controlSocketPath, "-O", "check", host.alias])
             let isRunning = result.success

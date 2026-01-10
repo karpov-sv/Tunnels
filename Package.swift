@@ -5,11 +5,11 @@ let package = Package(
     name: "Tunnels",
     platforms: [.macOS(.v14)],
     products: [
-        .executable(name: "TunnelsApp", targets: ["TunnelsApp"])
+        .executable(name: "Tunnels", targets: ["Tunnels"])
     ],
     targets: [
         .executableTarget(
-            name: "TunnelsApp",
+            name: "Tunnels",
             path: "Sources/TunnelsApp"
         )
     ]

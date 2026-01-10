@@ -37,10 +37,28 @@ The app never parses `ssh_config` directly; it uses `ssh -G <host-alias>` when i
 
 ## Quick Start
 - Build: `swift build`
-- Run: `swift run TunnelsApp`
+- Run: `swift run Tunnels`
 
 ## Packaging & Notarization
 - Open in Xcode: `open Package.swift`
 - Set your Team, signing, and a bundle identifier in the project settings.
 - Archive via Xcode (Product → Archive) to produce a signed `.app`.
 - Notarize and staple with Apple’s notarization workflow.
+
+CLI build (optional):
+- Unsigned app: `./scripts/build_app.sh`
+- Signed export: `TEAM_ID=YOUR_TEAM_ID ./scripts/build_app.sh`
+- Wrapped app from SwiftPM binary: `./scripts/build_app.sh` (uses `BUNDLE_ID`, `VERSION`, `SHORT_VERSION` if set)
+- Optional codesign for wrapped app: `CODE_SIGN_IDENTITY="Developer ID Application: Your Name" ./scripts/build_app.sh`
+
+Generate an Xcode app project (optional):
+- `./scripts/generate_xcodeproj.sh`
+- Custom bundle ID: `BUNDLE_ID=com.yourco.tunnels ./scripts/generate_xcodeproj.sh`
+ - If `xcodegen` is missing, the script falls back to `swift package generate-xcodeproj` (CLI product only).
+
+Build the generated Xcode app (optional):
+- `./scripts/build_xcode_app.sh`
+- Signed build: `TEAM_ID=YOUR_TEAM_ID ./scripts/build_xcode_app.sh`
+
+Info.plist:
+- The generated Xcode project uses `Resources/Info.plist` (LSUIElement enabled).

@@ -72,7 +72,7 @@ struct HostsPreferencesView: View {
         if manager.isHostReconnecting(host) {
             return .reconnecting
         }
-        return manager.runtimeState(for: host).isMasterRunning ? .connected : .disconnected
+        return manager.runtimeStateSnapshot(for: host).isMasterRunning ? .connected : .disconnected
     }
 }
 
@@ -229,7 +229,7 @@ private struct HostDetailPane: View {
     }
 
     private var isHostConnected: Bool {
-        manager.runtimeState(for: host).isMasterRunning
+        manager.runtimeStateSnapshot(for: host).isMasterRunning
     }
 
     private var connectionTitle: String {

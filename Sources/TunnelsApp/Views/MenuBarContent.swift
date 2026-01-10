@@ -83,11 +83,11 @@ struct MenuBarContent: View {
         if manager.isHostReconnecting(host) {
             return .reconnecting
         }
-        return manager.runtimeState(for: host).isMasterRunning ? .connected : .disconnected
+        return manager.runtimeStateSnapshot(for: host).isMasterRunning ? .connected : .disconnected
     }
 
     private func isHostConnected(_ host: HostProfile) -> Bool {
-        manager.runtimeState(for: host).isMasterRunning
+        manager.runtimeStateSnapshot(for: host).isMasterRunning
     }
 
     private func connectionTitle(for host: HostProfile) -> String {
