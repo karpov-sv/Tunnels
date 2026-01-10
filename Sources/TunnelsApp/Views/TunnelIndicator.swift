@@ -32,7 +32,7 @@ enum TunnelIndicatorState {
         case .reconnecting:
             return "Reconnecting"
         case .warning:
-            return "Warning"
+            return "Port in use"
         case .error:
             return "Error"
         }
