@@ -6,32 +6,40 @@ struct HostsPreferencesView: View {
     @State private var showingAddHost = false
 
     var body: some View {
-        NavigationSplitView {
-            List(manager.hostProfiles, selection: $selection) { host in
-                HStack(spacing: 6) {
-                    StatusDotView(state: hostIndicatorState(host))
-                    Text(host.alias)
-                }
-            }
-            .navigationTitle("Hosts")
-            .frame(minWidth: 220)
-            .toolbar {
-                Button {
-                    addHostPlaceholder()
-                } label: {
-                    Image(systemName: "plus")
-                }
-                Button {
-                    if let selection {
-                        manager.removeHost(id: selection)
-                        self.selection = nil
+        HSplitView {
+            VStack(spacing: 0) {
+                List(manager.hostProfiles, selection: $selection) { host in
+                    HStack(spacing: 6) {
+                        StatusDotView(state: hostIndicatorState(host))
+                        Text(host.alias)
                     }
-                } label: {
-                    Image(systemName: "minus")
                 }
-                .disabled(selection == nil)
+                .listStyle(.sidebar)
+                .frame(minWidth: 220)
+
+                Divider()
+
+                HStack(spacing: 8) {
+                    Button {
+                        addHostPlaceholder()
+                    } label: {
+                        Image(systemName: "plus")
+                    }
+                    Button {
+                        if let selection {
+                            manager.removeHost(id: selection)
+                            self.selection = nil
+                        }
+                    } label: {
+                        Image(systemName: "minus")
+                    }
+                    .disabled(selection == nil)
+                    Spacer()
+                }
+                .padding(8)
             }
-        } detail: {
+            .frame(minWidth: 220)
+
             if let selection,
                let host = manager.hostProfile(id: selection) {
                 HostDetailPane(hostId: host.id)
@@ -43,7 +51,7 @@ struct HostsPreferencesView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
-        .navigationSplitViewStyle(.balanced)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .onAppear {
             if selection == nil {
                 selection = manager.hostProfiles.first?.id
@@ -87,6 +95,10 @@ private struct HostDetailPane: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
+            Text(host.alias)
+                .font(.title2)
+                .fontWeight(.semibold)
+
             GroupBox("Host") {
                 LabeledContent("Alias") {
                     HStack(spacing: 8) {
@@ -190,7 +202,6 @@ private struct HostDetailPane: View {
         }
         .padding(16)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .navigationTitle(host.alias)
         .onAppear {
             aliasDraft = host.alias
             if selectedTunnelId == nil {
