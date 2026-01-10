@@ -63,6 +63,11 @@ struct MenuBarContent: View {
             manager.preferencesTab = .logs
             openWindow(id: "preferences")
         }
+        Button("About...") {
+            NSApp.activate(ignoringOtherApps: true)
+            manager.preferencesTab = .about
+            openWindow(id: "preferences")
+        }
         Button("Preferences...") {
             NSApp.activate(ignoringOtherApps: true)
             manager.preferencesTab = .general

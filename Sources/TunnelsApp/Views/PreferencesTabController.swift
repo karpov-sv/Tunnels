@@ -39,9 +39,15 @@ final class PreferencesTabController: NSTabViewController {
             systemImage: "doc.text.magnifyingglass",
             view: LogsPreferencesView().environmentObject(manager)
         )
+        let about = makeItem(
+            tab: .about,
+            label: "About",
+            systemImage: "info.circle",
+            view: AboutPreferencesView().environmentObject(manager)
+        )
 
-        tabViewItems = [general, hosts, logs]
-        tabs = [.general: general, .hosts: hosts, .logs: logs]
+        tabViewItems = [general, hosts, logs, about]
+        tabs = [.general: general, .hosts: hosts, .logs: logs, .about: about]
         if let item = tabs[manager.preferencesTab] {
             tabView.selectTabViewItem(item)
         }
