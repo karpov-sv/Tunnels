@@ -60,16 +60,10 @@ else
   APP_DIR="$ARCHIVE_PATH/Products/Applications"
   APP_PATH=""
   if [[ -d "$APP_DIR" ]]; then
-    mapfile -t APPS < <(find "$APP_DIR" -maxdepth 1 -type d -name "*.app" 2>/dev/null)
-    if [[ ${#APPS[@]} -gt 0 ]]; then
-      APP_PATH="${APPS[0]}"
-    fi
+    APP_PATH="$(find "$APP_DIR" -maxdepth 1 -type d -name "*.app" -print -quit 2>/dev/null)"
   fi
   if [[ -z "$APP_PATH" ]]; then
-    mapfile -t APPS < <(find "$ARCHIVE_PATH" -type d -name "*.app" 2>/dev/null)
-    if [[ ${#APPS[@]} -gt 0 ]]; then
-      APP_PATH="${APPS[0]}"
-    fi
+    APP_PATH="$(find "$ARCHIVE_PATH" -type d -name "*.app" -print -quit 2>/dev/null)"
   fi
 
   if [[ -n "$APP_PATH" && -d "$APP_PATH" ]]; then
@@ -82,10 +76,7 @@ else
 
   BIN_PATH="$ARCHIVE_PATH/Products/usr/local/bin/$SCHEME"
   if [[ ! -x "$BIN_PATH" ]]; then
-    mapfile -t BINS < <(find "$ARCHIVE_PATH/Products" -type f -name "$SCHEME" -perm -111 2>/dev/null)
-    if [[ ${#BINS[@]} -gt 0 ]]; then
-      BIN_PATH="${BINS[0]}"
-    fi
+    BIN_PATH="$(find "$ARCHIVE_PATH/Products" -type f -name "$SCHEME" -perm -111 -print -quit 2>/dev/null)"
   fi
 
   if [[ ! -x "$BIN_PATH" ]]; then
@@ -98,6 +89,20 @@ else
   rm -rf "$APP_BUNDLE"
   mkdir -p "$APP_BUNDLE/Contents/MacOS" "$APP_BUNDLE/Contents/Resources"
   cp "$BIN_PATH" "$APP_BUNDLE/Contents/MacOS/$SCHEME"
+
+  ICON_FILE=""
+  APP_ICONSET="$ROOT_DIR/Resources/Assets.xcassets/AppIcon.appiconset"
+  if command -v iconutil >/dev/null 2>&1 && [[ -d "$APP_ICONSET" ]]; then
+    ICON_TMP="$(mktemp -d)"
+    trap 'rm -rf "$ICON_TMP"' EXIT
+    ICONSET_DIR="$ICON_TMP/AppIcon.iconset"
+    mkdir -p "$ICONSET_DIR"
+    cp "$APP_ICONSET"/icon_*.png "$ICONSET_DIR/" 2>/dev/null || true
+    if [[ -n "$(ls -A "$ICONSET_DIR" 2>/dev/null)" ]]; then
+      ICON_FILE="AppIcon.icns"
+      iconutil -c icns "$ICONSET_DIR" -o "$APP_BUNDLE/Contents/Resources/$ICON_FILE" >/dev/null 2>&1 || ICON_FILE=""
+    fi
+  fi
 
   cat <<PLIST > "$APP_BUNDLE/Contents/Info.plist"
 <?xml version="1.0" encoding="UTF-8"?>
@@ -118,6 +123,8 @@ else
     <string>$SHORT_VERSION</string>
     <key>CFBundleVersion</key>
     <string>$VERSION</string>
+    <key>CFBundleIconFile</key>
+    <string>${ICON_FILE%.*}</string>
     <key>LSUIElement</key>
     <true/>
     <key>NSHighResolutionCapable</key>

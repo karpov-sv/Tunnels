@@ -29,9 +29,15 @@ struct TunnelsApp: App {
     }
 
     var body: some Scene {
-        MenuBarExtra("Tunnels", systemImage: "link") {
+        MenuBarExtra {
             MenuBarContent()
                 .environmentObject(manager)
+        } label: {
+            Image(nsImage: menuBarIcon())
+                .renderingMode(.template)
+                .resizable()
+                .frame(width: 18, height: 18)
+                .accessibilityLabel("Tunnels")
         }
 
         WindowGroup("Preferences", id: "preferences") {
@@ -53,5 +59,21 @@ struct TunnelsApp: App {
             HostDetailsView(hostId: $hostId)
                 .environmentObject(manager)
         }
+    }
+
+    private func menuBarIcon() -> NSImage {
+        guard let source = NSApplication.shared.applicationIconImage ?? NSImage(systemSymbolName: "link", accessibilityDescription: nil) else {
+            return NSImage()
+        }
+        let targetSize = NSSize(width: 18, height: 18)
+        let target = NSImage(size: targetSize)
+        target.lockFocus()
+        source.draw(in: NSRect(origin: .zero, size: targetSize),
+                    from: .zero,
+                    operation: .sourceOver,
+                    fraction: 1.0)
+        target.unlockFocus()
+        target.isTemplate = true
+        return target
     }
 }
