@@ -23,6 +23,21 @@ enum TunnelIndicatorState {
         }
     }
 
+    var nsColor: NSColor {
+        switch self {
+        case .connected:
+            return .systemGreen
+        case .disconnected:
+            return .systemOrange
+        case .reconnecting:
+            return .systemBlue
+        case .warning:
+            return .systemYellow
+        case .error:
+            return .systemRed
+        }
+    }
+
     var label: String {
         switch self {
         case .connected:

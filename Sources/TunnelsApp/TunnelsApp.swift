@@ -33,11 +33,8 @@ struct TunnelsApp: App {
             MenuBarContent()
                 .environmentObject(manager)
         } label: {
-            Image(nsImage: menuBarIcon())
-                .renderingMode(.template)
-                .resizable()
-                .frame(width: 18, height: 18)
-                .accessibilityLabel("Tunnels")
+            MenuBarIconView(baseIcon: menuBarIcon())
+                .environmentObject(manager)
         }
 
         WindowGroup("Preferences", id: "preferences") {
