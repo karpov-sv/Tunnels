@@ -16,6 +16,8 @@ struct AboutPreferencesView: View {
                     .fontWeight(.semibold)
                 Text(versionLine)
                     .foregroundStyle(.secondary)
+                Text(buildDateLine)
+                    .foregroundStyle(.secondary)
             }
 
             Text("Menu bar SSH tunnel manager for macOS.")
@@ -33,6 +35,17 @@ struct AboutPreferencesView: View {
         let shortVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.0"
         let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "1"
         return "Version \(shortVersion) (\(build))"
+    }
+
+    private var buildDateLine: String {
+        guard let url = Bundle.main.executableURL else {
+            return "Build date unavailable"
+        }
+        let attributes = try? FileManager.default.attributesOfItem(atPath: url.path)
+        guard let date = attributes?[.modificationDate] as? Date else {
+            return "Build date unavailable"
+        }
+        return "Built \(Self.buildDateFormatter.string(from: date))"
     }
 
     private var appIconImage: NSImage {
@@ -61,4 +74,12 @@ struct AboutPreferencesView: View {
         copy.isTemplate = false
         return copy
     }
+
+    private static let buildDateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
+        return formatter
+    }()
 }
