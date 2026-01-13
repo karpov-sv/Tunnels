@@ -107,18 +107,8 @@ struct GeneralPreferencesView: View {
                         Text(notificationStatusText)
                             .foregroundStyle(notificationStatusColor)
                     }
-                    HStack(spacing: 8) {
-                        Text("Signing")
-                        Text(notificationSigningText)
-                            .foregroundStyle(notificationSigningColor)
-                    }
                     if !manager.notificationsAvailable {
                         Text("Notifications are available only when running the app bundle.")
-                            .font(.caption)
-                            .foregroundStyle(.red)
-                    }
-                    if manager.codeSigningStatus == .unsigned {
-                        Text("Notifications require a signed app.")
                             .font(.caption)
                             .foregroundStyle(.red)
                     }
@@ -162,7 +152,6 @@ struct GeneralPreferencesView: View {
             maxAttemptsInput = "\(manager.autoReconnectMaxAttempts)"
             delayInput = "\(Int(manager.autoReconnectDelaySeconds))"
             manager.refreshNotificationAuthorizationStatus()
-            manager.refreshCodeSigningStatus()
         }
         .onChange(of: manager.autoReconnectMaxAttempts) { _, newValue in
             if maxAttemptsValid {
@@ -291,31 +280,6 @@ struct GeneralPreferencesView: View {
         }
     }
 
-    private var notificationSigningText: String {
-        switch manager.codeSigningStatus {
-        case .unknown:
-            return "Unknown"
-        case .unsigned:
-            return "Unsigned"
-        case .adHoc:
-            return "Ad hoc"
-        case .signed:
-            return "Signed"
-        }
-    }
-
-    private var notificationSigningColor: Color {
-        switch manager.codeSigningStatus {
-        case .signed:
-            return .green
-        case .adHoc:
-            return .orange
-        case .unsigned:
-            return .red
-        case .unknown:
-            return .secondary
-        }
-    }
 
     private func validateMaxAttempts(_ text: String) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)

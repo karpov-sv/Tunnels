@@ -1,8 +1,6 @@
 import AppKit
-import CoreServices
 import Darwin
 import Foundation
-import Security
 import UserNotifications
 
 struct HostRuntimeState: Equatable {
@@ -30,7 +28,6 @@ final class TunnelManager: ObservableObject {
         }
     }
     @Published private(set) var notificationAuthorizationStatus: UNAuthorizationStatus = .notDetermined
-    @Published private(set) var codeSigningStatus: CodeSigningStatus = .unknown
     @Published var autoReconnectEnabled: Bool {
         didSet {
             persistAutoReconnect()
@@ -121,7 +118,6 @@ final class TunnelManager: ObservableObject {
         }
 
         load()
-        refreshCodeSigningStatus()
         statusTask = Task { [weak self] in
             await self?.pollStatusLoop()
         }
@@ -323,7 +319,6 @@ final class TunnelManager: ObservableObject {
 
     func configureNotificationsIfNeeded() {
         guard isRunningInAppBundle else { return }
-        registerAppWithLaunchServices()
         notificationCenter?.delegate = notificationDelegate
         refreshNotificationAuthorizationStatus()
         if logNotificationsEnabled {
@@ -333,35 +328,8 @@ final class TunnelManager: ObservableObject {
         }
     }
 
-    func refreshCodeSigningStatus() {
-        let bundleURL = Bundle.main.bundleURL as CFURL
-        var staticCode: SecStaticCode?
-        let createStatus = SecStaticCodeCreateWithPath(bundleURL, [], &staticCode)
-        guard createStatus == errSecSuccess, let staticCode else {
-            codeSigningStatus = .unsigned
-            return
-        }
-        var info: CFDictionary?
-        let infoStatus = SecCodeCopySigningInformation(
-            staticCode,
-            SecCSFlags(rawValue: kSecCSSigningInformation),
-            &info
-        )
-        guard infoStatus == errSecSuccess, let info = info as? [String: Any] else {
-            codeSigningStatus = .unsigned
-            return
-        }
-        let teamIdentifier = info[kSecCodeInfoTeamIdentifier as String] as? String
-        if teamIdentifier?.isEmpty != false {
-            codeSigningStatus = .adHoc
-        } else {
-            codeSigningStatus = .signed
-        }
-    }
-
     func requestNotificationAuthorization() {
         guard notificationsAvailable else { return }
-        registerAppWithLaunchServices()
         notificationCenter?.delegate = notificationDelegate
         Task {
             await requestNotificationAuthorizationIfNeeded()
@@ -687,9 +655,8 @@ final class TunnelManager: ObservableObject {
         lastNotificationIdentifier = identifier
 
         let content = UNMutableNotificationContent()
-        content.title = "Tunnels"
+        content.title = notificationTitle(for: entries)
         if entries.count == 1, let entry = entries.first {
-            content.subtitle = entry.level == .error ? "Error" : "Info"
             content.body = entry.message
         } else {
             content.subtitle = "\(entries.count) new log messages"
@@ -703,17 +670,22 @@ final class TunnelManager: ObservableObject {
         notificationCenter.add(request)
     }
 
+    private func notificationTitle(for entries: [LogEntry]) -> String {
+        let hasError = entries.contains { $0.level == .error }
+        let hasInfo = entries.contains { $0.level == .info }
+        let indicator: String
+        if hasError && hasInfo {
+            indicator = "🟡"
+        } else if hasError {
+            indicator = "🔴"
+        } else {
+            indicator = "🟢"
+        }
+        return "\(indicator) Tunnels"
+    }
+
     private func notificationBody(for entries: [LogEntry]) -> String {
-        let maxLines = 3
-        let prefixLines = entries.suffix(maxLines).map { entry in
-            let level = entry.level == .error ? "ERROR" : "INFO"
-            return "\(level): \(entry.message)"
-        }
-        let remaining = max(entries.count - maxLines, 0)
-        if remaining == 0 {
-            return prefixLines.joined(separator: "\n")
-        }
-        return prefixLines.joined(separator: "\n") + "\n... and \(remaining) more"
+        entries.map(\.message).joined(separator: "\n")
     }
 
     private func clearNotificationQueue() {
@@ -739,10 +711,6 @@ final class TunnelManager: ObservableObject {
         notificationAuthorizationStatus = updatedSettings.authorizationStatus
     }
 
-    private func registerAppWithLaunchServices() {
-        let bundleURL = Bundle.main.bundleURL as CFURL
-        LSRegisterURL(bundleURL, true)
-    }
 
     private func failureMessage(action: String, result: ExecResult) -> String {
         if result.combinedOutput.isEmpty {
@@ -870,11 +838,4 @@ private final class NotificationDelegate: NSObject, UNUserNotificationCenterDele
     ) {
         completionHandler([.banner, .list, .sound])
     }
-}
-
-enum CodeSigningStatus {
-    case unknown
-    case unsigned
-    case adHoc
-    case signed
 }
