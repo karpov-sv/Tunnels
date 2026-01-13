@@ -14,6 +14,7 @@ final class TunnelManager: ObservableObject {
     @Published private(set) var tunnelErrors: Set<UUID> = []
     @Published var preferencesTab: PreferencesTab = .general
     @Published private(set) var reconnectingHosts: Set<UUID> = []
+    @Published private(set) var reconnectingTunnelsByHost: [UUID: Set<UUID>] = [:]
     @Published var autoReconnectEnabled: Bool {
         didSet {
             persistAutoReconnect()
@@ -171,6 +172,7 @@ final class TunnelManager: ObservableObject {
         runtimeStates[id] = nil
         tunnelErrors.subtract(host.tunnels.map(\.id))
         reconnectingHosts.remove(id)
+        reconnectingTunnelsByHost[id] = nil
         persist()
         logInfo("Removed host \(host.alias)")
     }
@@ -269,6 +271,10 @@ final class TunnelManager: ObservableObject {
 
     func isHostReconnecting(_ host: HostProfile) -> Bool {
         reconnectingHosts.contains(host.id)
+    }
+
+    func isTunnelReconnecting(hostId: UUID, tunnelId: UUID) -> Bool {
+        reconnectingTunnelsByHost[hostId]?.contains(tunnelId) == true
     }
 
     func clearLogs() {
@@ -461,6 +467,7 @@ final class TunnelManager: ObservableObject {
         }
         tunnelErrors.subtract(host.tunnels.map(\.id))
         reconnectingHosts.remove(host.id)
+        reconnectingTunnelsByHost[host.id] = nil
         runtimeStates[host.id]?.isMasterRunning = false
     }
 
@@ -574,7 +581,11 @@ final class TunnelManager: ObservableObject {
         guard autoReconnectEnabled else { return }
         guard reconnectingHosts.contains(hostId) == false else { return }
         reconnectingHosts.insert(hostId)
-        defer { reconnectingHosts.remove(hostId) }
+        reconnectingTunnelsByHost[hostId] = Set(previouslyActive.map(\.id))
+        defer {
+            reconnectingHosts.remove(hostId)
+            reconnectingTunnelsByHost[hostId] = nil
+        }
 
         let maxAttempts = autoReconnectMaxAttempts
         let delaySeconds = max(1, autoReconnectDelaySeconds)

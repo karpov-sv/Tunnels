@@ -21,9 +21,9 @@ struct MenuBarContent: View {
                                 manager.toggleTunnel(hostId: host.id, tunnelId: tunnel.id)
                             } label: {
                                 Label {
-                                    Text(tunnelLabel(tunnel))
+                                    Text(tunnelLabel(tunnel, host: host))
                                 } icon: {
-                                    MenuStatusDotView(state: tunnelIndicatorState(for: tunnel, manager: manager))
+                                    MenuStatusDotView(state: tunnelIndicatorState(for: tunnel, host: host, manager: manager))
                                 }
                                 .labelStyle(.titleAndIcon)
                             }
@@ -79,8 +79,9 @@ struct MenuBarContent: View {
         }
     }
 
-    private func tunnelLabel(_ tunnel: TunnelSpec) -> String {
-        let action = tunnel.isActive ? "Stop" : "Start"
+    private func tunnelLabel(_ tunnel: TunnelSpec, host: HostProfile) -> String {
+        let shouldStop = tunnel.isActive || manager.isTunnelReconnecting(hostId: host.id, tunnelId: tunnel.id)
+        let action = shouldStop ? "Stop" : "Start"
         return "\(action) \(tunnel.displaySummary)"
     }
 

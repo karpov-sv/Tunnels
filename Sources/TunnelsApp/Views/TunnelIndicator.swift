@@ -121,7 +121,10 @@ private enum MenuStatusDotCache {
 }
 
 @MainActor
-func tunnelIndicatorState(for tunnel: TunnelSpec, manager: TunnelManager) -> TunnelIndicatorState {
+func tunnelIndicatorState(for tunnel: TunnelSpec, host: HostProfile, manager: TunnelManager) -> TunnelIndicatorState {
+    if manager.isHostReconnecting(host) {
+        return .reconnecting
+    }
     if tunnel.isActive {
         return .connected
     }

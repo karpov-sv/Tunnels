@@ -149,7 +149,7 @@ private struct HostDetailPane: View {
                     } else {
                         Table(host.tunnels, selection: $selectedTunnelId) {
                             TableColumn("Status") { tunnel in
-                                TunnelStatusCell(state: tunnelIndicatorState(for: tunnel, manager: manager))
+                                TunnelStatusCell(state: tunnelIndicatorState(for: tunnel, host: host, manager: manager))
                             }
                             .width(min: 110, ideal: 140)
                             TableColumn("Tunnel") { tunnel in
@@ -236,7 +236,10 @@ private struct HostDetailPane: View {
     }
 
     private var startStopTitle: String {
-        selectedTunnel?.isActive == true ? "Stop" : "Start"
+        guard let selectedTunnel else { return "Start" }
+        let shouldStop = selectedTunnel.isActive
+            || manager.isTunnelReconnecting(hostId: hostId, tunnelId: selectedTunnel.id)
+        return shouldStop ? "Stop" : "Start"
     }
 
     private var isHostConnected: Bool {
