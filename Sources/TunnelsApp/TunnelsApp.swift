@@ -4,6 +4,10 @@ import SwiftUI
 final class AppDelegate: NSObject, NSApplicationDelegate {
     var manager: TunnelManager?
 
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        manager?.configureNotificationsIfNeeded()
+    }
+
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         guard let manager else { return .terminateNow }
         Task {

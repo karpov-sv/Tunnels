@@ -12,6 +12,7 @@ BUNDLE_ID="${BUNDLE_ID:-com.example.tunnels}"
 VERSION="${VERSION:-1}"
 SHORT_VERSION="${SHORT_VERSION:-1.0}"
 CODE_SIGN_IDENTITY="${CODE_SIGN_IDENTITY:-}"
+ADHOC_SIGN="${ADHOC_SIGN:-1}"
 
 SIGN_ARGS=()
 if [[ -n "$TEAM_ID" ]]; then
@@ -24,6 +25,21 @@ else
   SIGN_ARGS+=("CODE_SIGNING_REQUIRED=NO")
   SIGN_ARGS+=("CODE_SIGNING_ALLOWED=NO")
 fi
+
+sign_app() {
+  local app_path="$1"
+  if ! command -v codesign >/dev/null 2>&1; then
+    echo "codesign not found; skipping signing." >&2
+    return 0
+  fi
+  if [[ -n "$CODE_SIGN_IDENTITY" ]]; then
+    codesign --force --deep --options runtime --timestamp --sign "$CODE_SIGN_IDENTITY" "$app_path"
+    return $?
+  fi
+  if [[ "$ADHOC_SIGN" == "1" ]]; then
+    codesign --force --deep --sign - "$app_path"
+  fi
+}
 
 xcodebuild -scheme "$SCHEME" \
   -configuration "$CONFIGURATION" \
@@ -70,6 +86,7 @@ else
     APP_NAME="$(basename "$APP_PATH")"
     rm -rf "$EXPORT_PATH/$APP_NAME"
     cp -R "$APP_PATH" "$EXPORT_PATH/"
+    sign_app "$EXPORT_PATH/$APP_NAME"
     echo "Copied app to $EXPORT_PATH/$APP_NAME"
     exit 0
   fi
@@ -133,9 +150,7 @@ else
 </plist>
 PLIST
 
-  if [[ -n "$CODE_SIGN_IDENTITY" ]]; then
-    codesign --force --options runtime --timestamp --sign "$CODE_SIGN_IDENTITY" "$APP_BUNDLE"
-  fi
+  sign_app "$APP_BUNDLE"
 
   echo "Wrapped executable into $APP_BUNDLE"
 fi

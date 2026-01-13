@@ -1,5 +1,6 @@
 import SwiftUI
 import UniformTypeIdentifiers
+import UserNotifications
 
 struct GeneralPreferencesView: View {
     @EnvironmentObject private var manager: TunnelManager
@@ -89,6 +90,43 @@ struct GeneralPreferencesView: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
+            GroupBox("Notifications") {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(alignment: .firstTextBaseline, spacing: 12) {
+                        Text("Show log notifications")
+                        Spacer()
+                        Toggle("", isOn: $manager.logNotificationsEnabled)
+                            .toggleStyle(.switch)
+                            .labelsHidden()
+                    }
+                    Text("Display log messages in Notification Center.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    HStack(spacing: 8) {
+                        Text("Status")
+                        Text(notificationStatusText)
+                            .foregroundStyle(notificationStatusColor)
+                    }
+                    HStack(spacing: 8) {
+                        Text("Signing")
+                        Text(notificationSigningText)
+                            .foregroundStyle(notificationSigningColor)
+                    }
+                    if !manager.notificationsAvailable {
+                        Text("Notifications are available only when running the app bundle.")
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                    }
+                    if manager.codeSigningStatus == .unsigned {
+                        Text("Notifications require a signed app.")
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                    }
+                }
+                .padding(.top, 4)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
             GroupBox("Paths") {
                 Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 8) {
                     GridRow {
@@ -123,6 +161,8 @@ struct GeneralPreferencesView: View {
         .onAppear {
             maxAttemptsInput = "\(manager.autoReconnectMaxAttempts)"
             delayInput = "\(Int(manager.autoReconnectDelaySeconds))"
+            manager.refreshNotificationAuthorizationStatus()
+            manager.refreshCodeSigningStatus()
         }
         .onChange(of: manager.autoReconnectMaxAttempts) { _, newValue in
             if maxAttemptsValid {
@@ -132,6 +172,13 @@ struct GeneralPreferencesView: View {
         .onChange(of: manager.autoReconnectDelaySeconds) { _, newValue in
             if delayValid {
                 delayInput = "\(Int(newValue))"
+            }
+        }
+        .onChange(of: manager.logNotificationsEnabled) { _, newValue in
+            if newValue {
+                manager.requestNotificationAuthorization()
+            } else {
+                manager.refreshNotificationAuthorizationStatus()
             }
         }
         .fileImporter(
@@ -206,6 +253,68 @@ struct GeneralPreferencesView: View {
             return .green
         }
         return .red
+    }
+
+    private var notificationStatusText: String {
+        if !manager.notificationsAvailable {
+            return "Unavailable"
+        }
+        switch manager.notificationAuthorizationStatus {
+        case .authorized:
+            return "Allowed"
+        case .denied:
+            return "Denied"
+        case .notDetermined:
+            return "Not requested"
+        case .provisional:
+            return "Provisional"
+        case .ephemeral:
+            return "Ephemeral"
+        @unknown default:
+            return "Unknown"
+        }
+    }
+
+    private var notificationStatusColor: Color {
+        if !manager.notificationsAvailable {
+            return .red
+        }
+        switch manager.notificationAuthorizationStatus {
+        case .authorized, .provisional, .ephemeral:
+            return .green
+        case .denied:
+            return .red
+        case .notDetermined:
+            return .secondary
+        @unknown default:
+            return .secondary
+        }
+    }
+
+    private var notificationSigningText: String {
+        switch manager.codeSigningStatus {
+        case .unknown:
+            return "Unknown"
+        case .unsigned:
+            return "Unsigned"
+        case .adHoc:
+            return "Ad hoc"
+        case .signed:
+            return "Signed"
+        }
+    }
+
+    private var notificationSigningColor: Color {
+        switch manager.codeSigningStatus {
+        case .signed:
+            return .green
+        case .adHoc:
+            return .orange
+        case .unsigned:
+            return .red
+        case .unknown:
+            return .secondary
+        }
     }
 
     private func validateMaxAttempts(_ text: String) {

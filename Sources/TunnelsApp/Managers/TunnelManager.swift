@@ -1,5 +1,9 @@
+import AppKit
+import CoreServices
 import Darwin
 import Foundation
+import Security
+import UserNotifications
 
 struct HostRuntimeState: Equatable {
     let controlSocketPath: String
@@ -15,6 +19,18 @@ final class TunnelManager: ObservableObject {
     @Published var preferencesTab: PreferencesTab = .general
     @Published private(set) var reconnectingHosts: Set<UUID> = []
     @Published private(set) var reconnectingTunnelsByHost: [UUID: Set<UUID>] = [:]
+    @Published var logNotificationsEnabled: Bool {
+        didSet {
+            persistLogNotificationsEnabled()
+            if logNotificationsEnabled {
+                configureNotificationsIfNeeded()
+            } else {
+                clearNotificationQueue()
+            }
+        }
+    }
+    @Published private(set) var notificationAuthorizationStatus: UNAuthorizationStatus = .notDetermined
+    @Published private(set) var codeSigningStatus: CodeSigningStatus = .unknown
     @Published var autoReconnectEnabled: Bool {
         didSet {
             persistAutoReconnect()
@@ -41,6 +57,7 @@ final class TunnelManager: ObservableObject {
     private let autoReconnectKey = "autoReconnectEnabled"
     private let autoReconnectMaxAttemptsKey = "autoReconnectMaxAttempts"
     private let autoReconnectDelayKey = "autoReconnectDelaySeconds"
+    private let logNotificationsEnabledKey = "logNotificationsEnabled"
     private let defaultSSHPath = "/usr/bin/ssh"
     private let defaultReconnectMaxAttempts = 5
     private let defaultReconnectDelaySeconds: Double = 6
@@ -49,8 +66,23 @@ final class TunnelManager: ObservableObject {
     private let fileManager: FileManager
     private let configURL: URL
     private var statusTask: Task<Void, Never>?
+    private let isRunningInAppBundle: Bool
+    private lazy var notificationCenter: UNUserNotificationCenter? = {
+        guard isRunningInAppBundle else { return nil }
+        return UNUserNotificationCenter.current()
+    }()
+    private let notificationDelegate = NotificationDelegate()
+    private var pendingNotificationEntries: [LogEntry] = []
+    private var notificationFlushTask: Task<Void, Never>?
+    private var lastNotificationIdentifier: String?
+    private var lastNotificationDate: Date?
+    private let notificationCoalesceDelaySeconds: Double = 2
+    private let notificationIdentifierReuseWindowSeconds: Double = 4
 
     init(fileManager: FileManager = .default) {
+        let bundleURL = Bundle.main.bundleURL
+        let isBundled = bundleURL.pathExtension == "app" || Bundle.main.bundleIdentifier != nil
+        self.isRunningInAppBundle = isBundled
         let storedPath = UserDefaults.standard.string(forKey: sshPathKey)
         self.sshBinaryPath = storedPath?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
             ? storedPath ?? defaultSSHPath
@@ -70,6 +102,11 @@ final class TunnelManager: ObservableObject {
         } else {
             self.autoReconnectDelaySeconds = defaultReconnectDelaySeconds
         }
+        if UserDefaults.standard.object(forKey: logNotificationsEnabledKey) != nil {
+            self.logNotificationsEnabled = UserDefaults.standard.bool(forKey: logNotificationsEnabledKey)
+        } else {
+            self.logNotificationsEnabled = false
+        }
         self.fileManager = fileManager
         let appSupport = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
         let tunnelsDir = appSupport?.appendingPathComponent("Tunnels", isDirectory: true)
@@ -84,13 +121,16 @@ final class TunnelManager: ObservableObject {
         }
 
         load()
+        refreshCodeSigningStatus()
         statusTask = Task { [weak self] in
             await self?.pollStatusLoop()
         }
+        configureNotificationsIfNeeded()
     }
 
     deinit {
         statusTask?.cancel()
+        notificationFlushTask?.cancel()
     }
 
     func hostProfile(id: UUID) -> HostProfile? {
@@ -275,6 +315,69 @@ final class TunnelManager: ObservableObject {
 
     func isTunnelReconnecting(hostId: UUID, tunnelId: UUID) -> Bool {
         reconnectingTunnelsByHost[hostId]?.contains(tunnelId) == true
+    }
+
+    var notificationsAvailable: Bool {
+        isRunningInAppBundle
+    }
+
+    func configureNotificationsIfNeeded() {
+        guard isRunningInAppBundle else { return }
+        registerAppWithLaunchServices()
+        notificationCenter?.delegate = notificationDelegate
+        refreshNotificationAuthorizationStatus()
+        if logNotificationsEnabled {
+            Task {
+                await requestNotificationAuthorizationIfNeeded()
+            }
+        }
+    }
+
+    func refreshCodeSigningStatus() {
+        let bundleURL = Bundle.main.bundleURL as CFURL
+        var staticCode: SecStaticCode?
+        let createStatus = SecStaticCodeCreateWithPath(bundleURL, [], &staticCode)
+        guard createStatus == errSecSuccess, let staticCode else {
+            codeSigningStatus = .unsigned
+            return
+        }
+        var info: CFDictionary?
+        let infoStatus = SecCodeCopySigningInformation(
+            staticCode,
+            SecCSFlags(rawValue: kSecCSSigningInformation),
+            &info
+        )
+        guard infoStatus == errSecSuccess, let info = info as? [String: Any] else {
+            codeSigningStatus = .unsigned
+            return
+        }
+        let teamIdentifier = info[kSecCodeInfoTeamIdentifier as String] as? String
+        if teamIdentifier?.isEmpty != false {
+            codeSigningStatus = .adHoc
+        } else {
+            codeSigningStatus = .signed
+        }
+    }
+
+    func requestNotificationAuthorization() {
+        guard notificationsAvailable else { return }
+        registerAppWithLaunchServices()
+        notificationCenter?.delegate = notificationDelegate
+        Task {
+            await requestNotificationAuthorizationIfNeeded()
+        }
+    }
+
+    func refreshNotificationAuthorizationStatus() {
+        guard notificationsAvailable else {
+            notificationAuthorizationStatus = .notDetermined
+            return
+        }
+        Task { @MainActor [weak self] in
+            guard let self, let notificationCenter = self.notificationCenter else { return }
+            let settings = await notificationCenter.notificationSettings()
+            self.notificationAuthorizationStatus = settings.authorizationStatus
+        }
     }
 
     func clearLogs() {
@@ -532,12 +635,113 @@ final class TunnelManager: ObservableObject {
     }
 
     private func logInfo(_ message: String) {
-        logs.append(LogEntry(level: .info, message: message))
+        appendLog(LogEntry(level: .info, message: message))
     }
 
     private func logError(_ message: String) {
         lastError = message
-        logs.append(LogEntry(level: .error, message: message))
+        appendLog(LogEntry(level: .error, message: message))
+    }
+
+    private func appendLog(_ entry: LogEntry) {
+        logs.append(entry)
+        enqueueNotificationIfNeeded(entry)
+    }
+
+    private func enqueueNotificationIfNeeded(_ entry: LogEntry) {
+        guard logNotificationsEnabled, isRunningInAppBundle else { return }
+        pendingNotificationEntries.append(entry)
+        if notificationFlushTask == nil {
+            notificationFlushTask = Task { [weak self] in
+                guard let self else { return }
+                try? await Task.sleep(for: .seconds(self.notificationCoalesceDelaySeconds))
+                self.flushLogNotifications()
+            }
+        }
+    }
+
+    private func flushLogNotifications() {
+        notificationFlushTask = nil
+        guard logNotificationsEnabled else {
+            pendingNotificationEntries.removeAll()
+            return
+        }
+        guard let notificationCenter else {
+            pendingNotificationEntries.removeAll()
+            return
+        }
+        let entries = pendingNotificationEntries
+        pendingNotificationEntries.removeAll()
+        guard !entries.isEmpty else { return }
+
+        let now = Date()
+        let identifier: String
+        if let lastDate = lastNotificationDate,
+           let lastIdentifier = lastNotificationIdentifier,
+           now.timeIntervalSince(lastDate) <= notificationIdentifierReuseWindowSeconds {
+            identifier = lastIdentifier
+        } else {
+            identifier = UUID().uuidString
+        }
+        lastNotificationDate = now
+        lastNotificationIdentifier = identifier
+
+        let content = UNMutableNotificationContent()
+        content.title = "Tunnels"
+        if entries.count == 1, let entry = entries.first {
+            content.subtitle = entry.level == .error ? "Error" : "Info"
+            content.body = entry.message
+        } else {
+            content.subtitle = "\(entries.count) new log messages"
+            content.body = notificationBody(for: entries)
+        }
+        let request = UNNotificationRequest(
+            identifier: identifier,
+            content: content,
+            trigger: UNTimeIntervalNotificationTrigger(timeInterval: 0.1, repeats: false)
+        )
+        notificationCenter.add(request)
+    }
+
+    private func notificationBody(for entries: [LogEntry]) -> String {
+        let maxLines = 3
+        let prefixLines = entries.suffix(maxLines).map { entry in
+            let level = entry.level == .error ? "ERROR" : "INFO"
+            return "\(level): \(entry.message)"
+        }
+        let remaining = max(entries.count - maxLines, 0)
+        if remaining == 0 {
+            return prefixLines.joined(separator: "\n")
+        }
+        return prefixLines.joined(separator: "\n") + "\n... and \(remaining) more"
+    }
+
+    private func clearNotificationQueue() {
+        pendingNotificationEntries.removeAll()
+        notificationFlushTask?.cancel()
+        notificationFlushTask = nil
+        lastNotificationIdentifier = nil
+        lastNotificationDate = nil
+    }
+
+    private func requestNotificationAuthorizationIfNeeded() async {
+        guard let notificationCenter else { return }
+        let settings = await notificationCenter.notificationSettings()
+        guard settings.authorizationStatus == .notDetermined else {
+            notificationAuthorizationStatus = settings.authorizationStatus
+            return
+        }
+        if !NSApplication.shared.isActive {
+            NSApplication.shared.activate(ignoringOtherApps: true)
+        }
+        _ = try? await notificationCenter.requestAuthorization(options: [.alert, .sound, .badge])
+        let updatedSettings = await notificationCenter.notificationSettings()
+        notificationAuthorizationStatus = updatedSettings.authorizationStatus
+    }
+
+    private func registerAppWithLaunchServices() {
+        let bundleURL = Bundle.main.bundleURL as CFURL
+        LSRegisterURL(bundleURL, true)
     }
 
     private func failureMessage(action: String, result: ExecResult) -> String {
@@ -575,6 +779,10 @@ final class TunnelManager: ObservableObject {
 
     private func persistAutoReconnectDelaySeconds() {
         UserDefaults.standard.set(autoReconnectDelaySeconds, forKey: autoReconnectDelayKey)
+    }
+
+    private func persistLogNotificationsEnabled() {
+        UserDefaults.standard.set(logNotificationsEnabled, forKey: logNotificationsEnabledKey)
     }
 
     private func attemptAutoReconnect(hostId: UUID, previouslyActive: [TunnelSpec]) async {
@@ -652,4 +860,21 @@ final class TunnelManager: ObservableObject {
         }
         return result == 0
     }
+}
+
+private final class NotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        willPresent notification: UNNotification,
+        withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
+    ) {
+        completionHandler([.banner, .list, .sound])
+    }
+}
+
+enum CodeSigningStatus {
+    case unknown
+    case unsigned
+    case adHoc
+    case signed
 }
