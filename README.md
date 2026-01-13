@@ -56,9 +56,5 @@ Generate an Xcode app project (optional):
 - Custom bundle ID: `BUNDLE_ID=com.yourco.tunnels ./scripts/generate_xcodeproj.sh`
  - If `xcodegen` is missing, the script falls back to `swift package generate-xcodeproj` (CLI product only).
 
-Build the generated Xcode app (optional):
-- `./scripts/build_xcode_app.sh`
-- Signed build: `TEAM_ID=YOUR_TEAM_ID ./scripts/build_xcode_app.sh`
-
 Info.plist:
 - The generated Xcode project uses `Resources/Info.plist` (LSUIElement enabled).
