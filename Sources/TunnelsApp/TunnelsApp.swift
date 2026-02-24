@@ -41,13 +41,8 @@ struct TunnelsApp: App {
                 .environmentObject(manager)
         }
 
-        WindowGroup("Preferences", id: "preferences") {
+        Window("Preferences", id: "preferences") {
             PreferencesView()
-                .environmentObject(manager)
-        }
-
-        WindowGroup("Add Host", id: "add-host") {
-            AddHostView()
                 .environmentObject(manager)
         }
 

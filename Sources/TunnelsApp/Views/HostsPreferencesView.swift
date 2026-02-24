@@ -4,6 +4,7 @@ struct HostsPreferencesView: View {
     @EnvironmentObject private var manager: TunnelManager
     @State private var selection: UUID?
     @State private var showingAddHost = false
+    @State private var showingRemoveHostConfirmation = false
 
     var body: some View {
         HSplitView {
@@ -26,14 +27,26 @@ struct HostsPreferencesView: View {
                         Image(systemName: "plus")
                     }
                     Button {
-                        if let selection {
-                            manager.removeHost(id: selection)
-                            self.selection = nil
-                        }
+                        showingRemoveHostConfirmation = true
                     } label: {
                         Image(systemName: "minus")
                     }
                     .disabled(selection == nil)
+                    .confirmationDialog(
+                        "Remove this host and all its tunnels?",
+                        isPresented: $showingRemoveHostConfirmation,
+                        titleVisibility: .visible
+                    ) {
+                        Button("Remove", role: .destructive) {
+                            if let selection {
+                                let id = selection
+                                self.selection = nil
+                                Task {
+                                    await manager.removeHost(id: id)
+                                }
+                            }
+                        }
+                    }
                     Spacer()
                 }
                 .padding(8)
@@ -43,6 +56,7 @@ struct HostsPreferencesView: View {
             if let selection,
                let host = manager.hostProfile(id: selection) {
                 HostDetailPane(hostId: host.id)
+                    .id(host.id)
             } else {
                 VStack {
                     Text("Select a host to edit")
@@ -58,7 +72,9 @@ struct HostsPreferencesView: View {
             }
         }
         .onChange(of: manager.hostProfiles) { _, newValue in
-            if selection == nil {
+            if let selection, !newValue.contains(where: { $0.id == selection }) {
+                self.selection = newValue.first?.id
+            } else if selection == nil {
                 selection = newValue.first?.id
             }
         }
@@ -92,6 +108,7 @@ private struct HostDetailPane: View {
     @State private var showingAddTunnel = false
     @State private var editingTunnel: TunnelEditContext?
     @State private var selectedTunnelId: UUID?
+    @State private var showingRemoveTunnelConfirmation = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -105,7 +122,9 @@ private struct HostDetailPane: View {
                         TextField("Alias", text: $aliasDraft)
                             .frame(minWidth: 240)
                         Button("Save") {
-                            manager.updateHostAlias(hostId: hostId, alias: aliasDraft)
+                            Task {
+                                await manager.updateHostAlias(hostId: hostId, alias: aliasDraft)
+                            }
                         }
                         .disabled(aliasDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                         Button(connectionTitle) {
@@ -132,7 +151,11 @@ private struct HostDetailPane: View {
                     Spacer()
                     Toggle("", isOn: Binding(
                         get: { host.respectsConfigForwardings },
-                        set: { manager.updateHostForwardings(hostId: hostId, respectsConfigForwardings: $0) }
+                        set: { newValue in
+                            Task {
+                                await manager.updateHostForwardings(hostId: hostId, respectsConfigForwardings: newValue)
+                            }
+                        }
                     ))
                     .toggleStyle(.switch)
                     .labelsHidden()
@@ -188,12 +211,24 @@ private struct HostDetailPane: View {
                         }
                         .disabled(selectedTunnel == nil)
                         Button("Remove") {
-                            if let tunnel = selectedTunnel {
-                                manager.removeTunnel(hostId: hostId, tunnelId: tunnel.id)
-                                selectedTunnelId = nil
-                            }
+                            showingRemoveTunnelConfirmation = true
                         }
                         .disabled(selectedTunnel == nil)
+                        .confirmationDialog(
+                            "Remove this tunnel?",
+                            isPresented: $showingRemoveTunnelConfirmation,
+                            titleVisibility: .visible
+                        ) {
+                            Button("Remove", role: .destructive) {
+                                if let tunnel = selectedTunnel {
+                                    let tunnelId = tunnel.id
+                                    selectedTunnelId = nil
+                                    Task {
+                                        await manager.removeTunnel(hostId: hostId, tunnelId: tunnelId)
+                                    }
+                                }
+                            }
+                        }
                         Spacer()
                     }
                 }

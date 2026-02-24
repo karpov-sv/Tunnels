@@ -40,5 +40,6 @@ struct LogTextView: NSViewRepresentable {
         }
 
         textView.textStorage?.setAttributedString(attributed)
+        textView.scrollToEndOfDocument(nil)
     }
 }

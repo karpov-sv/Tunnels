@@ -6,14 +6,4 @@ final class ConfigInspector {
             SSHProcessRunner.run(executablePath: sshPath, args: ["-G", alias])
         }.value
     }
-
-    func parseConfig(_ output: String) -> [(String, String)] {
-        output
-            .split(separator: "\n")
-            .compactMap { line in
-                let parts = line.split(maxSplits: 1, whereSeparator: { $0 == " " || $0 == "\t" })
-                guard parts.count == 2 else { return nil }
-                return (String(parts[0]), parts[1].trimmingCharacters(in: .whitespaces))
-            }
-    }
 }

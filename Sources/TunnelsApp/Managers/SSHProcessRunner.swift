@@ -24,13 +24,25 @@ enum SSHProcessRunner {
 
         do {
             try process.run()
-            process.waitUntilExit()
         } catch {
             return ExecResult(exitCode: -1, stdout: "", stderr: "Failed to run ssh: \(error)")
         }
 
-        let stdoutData = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
-        let stderrData = stderrPipe.fileHandleForReading.readDataToEndOfFile()
+        var stdoutData = Data()
+        var stderrData = Data()
+        let group = DispatchGroup()
+        group.enter()
+        DispatchQueue.global().async {
+            stdoutData = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
+            group.leave()
+        }
+        group.enter()
+        DispatchQueue.global().async {
+            stderrData = stderrPipe.fileHandleForReading.readDataToEndOfFile()
+            group.leave()
+        }
+        process.waitUntilExit()
+        group.wait()
 
         let stdout = String(data: stdoutData, encoding: .utf8) ?? ""
         let stderr = String(data: stderrData, encoding: .utf8) ?? ""

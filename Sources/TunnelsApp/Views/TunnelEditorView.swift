@@ -33,7 +33,7 @@ struct TunnelEditorView: View {
             }
             .pickerStyle(.segmented)
 
-            TextField("Local port", text: $localPort)
+            TextField(type == .remote ? "Destination port" : "Local port", text: $localPort)
                 .textFieldStyle(.roundedBorder)
 
             if type != .dynamic {

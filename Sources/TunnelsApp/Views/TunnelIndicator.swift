@@ -131,7 +131,7 @@ func tunnelIndicatorState(for tunnel: TunnelSpec, host: HostProfile, manager: Tu
     if manager.tunnelHasError(tunnel.id) {
         return .error
     }
-    if tunnel.type != .remote, manager.localPortInUse(tunnel.localPort) {
+    if tunnel.type != .remote, manager.portsInUse.contains(tunnel.localPort) {
         return .warning
     }
     return .disconnected

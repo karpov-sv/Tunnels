@@ -37,6 +37,12 @@ struct MenuBarContent: View {
                         }
                     }
                     .disabled(!host.tunnels.contains(where: { !$0.isActive }))
+                    Button("Stop All Tunnels") {
+                        Task {
+                            await manager.stopAllTunnels(hostId: host.id)
+                        }
+                    }
+                    .disabled(!host.tunnels.contains(where: { $0.isActive }))
                     Button(connectionTitle(for: host)) {
                         Task {
                             if shouldDisconnectHost(host) {
@@ -73,10 +79,12 @@ struct MenuBarContent: View {
             manager.preferencesTab = .general
             openWindow(id: "preferences")
         }
+        .keyboardShortcut(",")
         Divider()
         Button("Quit") {
             NSApplication.shared.terminate(nil)
         }
+        .keyboardShortcut("q")
     }
 
     private func tunnelLabel(_ tunnel: TunnelSpec, host: HostProfile) -> String {
