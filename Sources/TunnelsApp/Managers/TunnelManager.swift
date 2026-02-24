@@ -152,6 +152,9 @@ final class TunnelManager: ObservableObject {
     }
 
     func statusLabel(for host: HostProfile) -> String {
+        if isHostReconnecting(host) {
+            return "Reconnecting"
+        }
         let state = runtimeStateSnapshot(for: host)
         if state.isMasterRunning {
             return "Connected"
@@ -281,7 +284,7 @@ final class TunnelManager: ObservableObject {
         guard let host = hostProfile(id: hostId),
               let tunnel = host.tunnels.first(where: { $0.id == tunnelId }) else { return }
         Task {
-            if tunnel.isActive {
+            if shouldStopTunnel(hostId: hostId, tunnelId: tunnelId) {
                 await stopTunnel(host: host, tunnel: tunnel)
             } else {
                 await startTunnel(host: host, tunnel: tunnel)
@@ -311,6 +314,18 @@ final class TunnelManager: ObservableObject {
 
     func isTunnelReconnecting(hostId: UUID, tunnelId: UUID) -> Bool {
         reconnectingTunnelsByHost[hostId]?.contains(tunnelId) == true
+    }
+
+    func shouldStopTunnel(hostId: UUID, tunnelId: UUID) -> Bool {
+        guard let host = hostProfile(id: hostId),
+              let tunnel = host.tunnels.first(where: { $0.id == tunnelId }) else { return false }
+        return tunnel.isActive
+            || isTunnelReconnecting(hostId: hostId, tunnelId: tunnelId)
+            || tunnelHasError(tunnelId)
+    }
+
+    func shouldDisconnectHost(_ host: HostProfile) -> Bool {
+        runtimeStateSnapshot(for: host).isMasterRunning || isHostReconnecting(host)
     }
 
     var notificationsAvailable: Bool {
@@ -769,8 +784,9 @@ final class TunnelManager: ObservableObject {
 
         var attempt = 0
         while true {
-            attempt += 1
             guard autoReconnectEnabled else { return }
+            guard reconnectingHosts.contains(hostId) else { return }
+            attempt += 1
             guard let host = hostProfile(id: hostId) else { return }
             if runtimeStates[hostId]?.isMasterRunning == true {
                 return

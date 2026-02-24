@@ -39,7 +39,7 @@ struct MenuBarContent: View {
                     .disabled(!host.tunnels.contains(where: { !$0.isActive }))
                     Button(connectionTitle(for: host)) {
                         Task {
-                            if isHostConnected(host) {
+                            if shouldDisconnectHost(host) {
                                 await manager.disconnectHost(id: host.id)
                             } else {
                                 await manager.connectHost(id: host.id)
@@ -80,7 +80,7 @@ struct MenuBarContent: View {
     }
 
     private func tunnelLabel(_ tunnel: TunnelSpec, host: HostProfile) -> String {
-        let shouldStop = tunnel.isActive || manager.isTunnelReconnecting(hostId: host.id, tunnelId: tunnel.id)
+        let shouldStop = manager.shouldStopTunnel(hostId: host.id, tunnelId: tunnel.id)
         let action = shouldStop ? "Stop" : "Start"
         return "\(action) \(tunnel.displaySummary)"
     }
@@ -92,12 +92,12 @@ struct MenuBarContent: View {
         return manager.runtimeStateSnapshot(for: host).isMasterRunning ? .connected : .disconnected
     }
 
-    private func isHostConnected(_ host: HostProfile) -> Bool {
-        manager.runtimeStateSnapshot(for: host).isMasterRunning
+    private func shouldDisconnectHost(_ host: HostProfile) -> Bool {
+        manager.shouldDisconnectHost(host)
     }
 
     private func connectionTitle(for host: HostProfile) -> String {
-        isHostConnected(host) ? "Disconnect Host" : "Connect Host"
+        shouldDisconnectHost(host) ? "Disconnect Host" : "Connect Host"
     }
 
 }

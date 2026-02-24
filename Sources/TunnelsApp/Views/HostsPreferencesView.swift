@@ -110,7 +110,7 @@ private struct HostDetailPane: View {
                         .disabled(aliasDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                         Button(connectionTitle) {
                             Task {
-                                if isHostConnected {
+                                if shouldDisconnectHost {
                                     await manager.disconnectHost(id: hostId)
                                 } else {
                                     await manager.connectHost(id: hostId)
@@ -237,17 +237,16 @@ private struct HostDetailPane: View {
 
     private var startStopTitle: String {
         guard let selectedTunnel else { return "Start" }
-        let shouldStop = selectedTunnel.isActive
-            || manager.isTunnelReconnecting(hostId: hostId, tunnelId: selectedTunnel.id)
+        let shouldStop = manager.shouldStopTunnel(hostId: hostId, tunnelId: selectedTunnel.id)
         return shouldStop ? "Stop" : "Start"
     }
 
-    private var isHostConnected: Bool {
-        manager.runtimeStateSnapshot(for: host).isMasterRunning
+    private var shouldDisconnectHost: Bool {
+        manager.shouldDisconnectHost(host)
     }
 
     private var connectionTitle: String {
-        isHostConnected ? "Disconnect Host" : "Connect Host"
+        shouldDisconnectHost ? "Disconnect Host" : "Connect Host"
     }
 
 }
