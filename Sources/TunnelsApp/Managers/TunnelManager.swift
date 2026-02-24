@@ -119,7 +119,9 @@ final class TunnelManager: ObservableObject {
 
         load()
         statusTask = Task { [weak self] in
-            await self?.pollStatusLoop()
+            guard let self else { return }
+            await self.cleanupStaleControlSocketsOnStartup()
+            await self.pollStatusLoop()
         }
         configureNotificationsIfNeeded()
     }
@@ -592,6 +594,50 @@ final class TunnelManager: ObservableObject {
                 }
             }
         }
+    }
+
+    private func cleanupStaleControlSocketsOnStartup() async {
+        for host in hostProfiles {
+            let socketPath = controlSocketManager.socketPath(for: host.alias)
+            guard fileManager.fileExists(atPath: socketPath) else { continue }
+
+            let check = await runSSH(args: ["-S", socketPath, "-O", "check", host.alias])
+            if check.success {
+                runtimeStates[host.id] = HostRuntimeState(
+                    controlSocketPath: socketPath,
+                    isMasterRunning: true
+                )
+                continue
+            }
+            if check.exitCode == -1 {
+                logError("Skipping stale socket cleanup for \(host.alias): \(check.combinedOutput)")
+                continue
+            }
+            if !isLikelyStaleSocketFailure(check) {
+                logError("Skipping stale socket cleanup for \(host.alias) due to unexpected check failure: \(check.combinedOutput)")
+                continue
+            }
+
+            do {
+                try fileManager.removeItem(atPath: socketPath)
+                logInfo("Removed stale control socket for \(host.alias)")
+            } catch {
+                logError("Failed to remove stale control socket for \(host.alias): \(error)")
+            }
+        }
+    }
+
+    private func isLikelyStaleSocketFailure(_ result: ExecResult) -> Bool {
+        let output = result.combinedOutput.lowercased()
+        let staleIndicators = [
+            "control socket connect",
+            "connection refused",
+            "no such file or directory",
+            "not a socket",
+            "broken pipe",
+            "connection reset"
+        ]
+        return staleIndicators.contains { output.contains($0) }
     }
 
     private func load() {
