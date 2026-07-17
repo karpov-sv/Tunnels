@@ -51,11 +51,9 @@ struct GeneralPreferencesView: View {
             GroupBox("Auto-Reconnect") {
                 VStack(alignment: .leading, spacing: 10) {
                     HStack(alignment: .firstTextBaseline, spacing: 12) {
-                        Text("Reconnect after unexpected disconnects")
-                        Spacer()
-                        Toggle("", isOn: $manager.autoReconnectEnabled)
+                        Toggle("Reconnect after unexpected disconnects", isOn: $manager.autoReconnectEnabled)
                             .toggleStyle(.switch)
-                            .labelsHidden()
+                            .frame(maxWidth: .infinity, alignment: .leading)
                     }
 
                     HStack(spacing: 16) {
@@ -69,7 +67,7 @@ struct GeneralPreferencesView: View {
                                     validateMaxAttempts(newValue)
                                 }
                             Text(maxAttemptsValid ? "0 = unlimited" : "Invalid")
-                                .foregroundColor(maxAttemptsValid ? .secondary : .red)
+                                .foregroundStyle(maxAttemptsValid ? Color.secondary : Color.red)
                         }
                         HStack(spacing: 8) {
                             Text("Delay")
@@ -81,7 +79,7 @@ struct GeneralPreferencesView: View {
                                     validateDelay(newValue)
                                 }
                             Text(delayValid ? "seconds" : "Invalid")
-                                .foregroundColor(delayValid ? .secondary : .red)
+                                .foregroundStyle(delayValid ? Color.secondary : Color.red)
                         }
                         Spacer()
                     }
@@ -93,11 +91,9 @@ struct GeneralPreferencesView: View {
             GroupBox("Notifications") {
                 VStack(alignment: .leading, spacing: 8) {
                     HStack(alignment: .firstTextBaseline, spacing: 12) {
-                        Text("Show log notifications")
-                        Spacer()
-                        Toggle("", isOn: $manager.logNotificationsEnabled)
+                        Toggle("Show log notifications", isOn: $manager.logNotificationsEnabled)
                             .toggleStyle(.switch)
-                            .labelsHidden()
+                            .frame(maxWidth: .infinity, alignment: .leading)
                     }
                     Text("Display log messages in Notification Center.")
                         .font(.caption)

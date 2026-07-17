@@ -49,7 +49,9 @@ struct TunnelEditorView: View {
                     dismiss()
                 }
                 Button("Save") {
-                    saveTunnel()
+                    Task {
+                        await saveTunnel()
+                    }
                 }
                 .disabled(!isValid)
             }
@@ -68,7 +70,7 @@ struct TunnelEditorView: View {
         return true
     }
 
-    private func saveTunnel() {
+    private func saveTunnel() async {
         guard let local = Int(localPort) else { return }
         let trimmedHost = remoteHost.trimmingCharacters(in: .whitespacesAndNewlines)
         let remote = Int(remotePort)
@@ -82,11 +84,15 @@ struct TunnelEditorView: View {
             isActive: false
         )
 
+        let didSave: Bool
         if let tunnel {
-            manager.updateTunnel(hostId: hostId, tunnelId: tunnel.id, updated: spec)
+            didSave = await manager.updateTunnel(hostId: hostId, tunnelId: tunnel.id, updated: spec)
         } else {
             manager.addTunnel(hostId: hostId, spec: spec)
+            didSave = true
         }
-        dismiss()
+        if didSave {
+            dismiss()
+        }
     }
 }

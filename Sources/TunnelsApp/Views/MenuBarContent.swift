@@ -27,22 +27,29 @@ struct MenuBarContent: View {
                                 }
                                 .labelStyle(.titleAndIcon)
                             }
+                            .disabled(manager.isTunnelOperationInProgress(tunnel.id))
                         }
                     }
 
                     Divider()
+                    Button("Add Tunnel...") {
+                        openWindow(id: "add-tunnel", value: host.id)
+                    }
+                    Button("Host Details...") {
+                        openWindow(id: "host-details", value: host.id)
+                    }
                     Button("Start All Tunnels") {
                         Task {
                             await manager.startAllTunnels(hostId: host.id)
                         }
                     }
-                    .disabled(!host.tunnels.contains(where: { !$0.isActive }))
+                    .disabled(!host.tunnels.contains(where: { !$0.isActive }) || hostHasTunnelOperation(host))
                     Button("Stop All Tunnels") {
                         Task {
                             await manager.stopAllTunnels(hostId: host.id)
                         }
                     }
-                    .disabled(!host.tunnels.contains(where: { $0.isActive }))
+                    .disabled(!host.tunnels.contains(where: { $0.isActive }) || hostHasTunnelOperation(host))
                     Button(connectionTitle(for: host)) {
                         Task {
                             if shouldDisconnectHost(host) {
@@ -102,6 +109,10 @@ struct MenuBarContent: View {
 
     private func shouldDisconnectHost(_ host: HostProfile) -> Bool {
         manager.shouldDisconnectHost(host)
+    }
+
+    private func hostHasTunnelOperation(_ host: HostProfile) -> Bool {
+        host.tunnels.contains { manager.isTunnelOperationInProgress($0.id) }
     }
 
     private func connectionTitle(for host: HostProfile) -> String {

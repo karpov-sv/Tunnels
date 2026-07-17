@@ -8,12 +8,12 @@ struct AboutPreferencesView: View {
                 .renderingMode(.original)
                 .resizable()
                 .frame(width: 96, height: 96)
-                .cornerRadius(18)
+                .clipShape(.rect(cornerRadius: 18))
 
             VStack(spacing: 4) {
                 Text(appName)
                     .font(.title2)
-                    .fontWeight(.semibold)
+                    .bold()
                 Text(versionLine)
                     .foregroundStyle(.secondary)
                 Text(buildDateLine)

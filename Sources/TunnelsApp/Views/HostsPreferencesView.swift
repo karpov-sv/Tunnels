@@ -16,21 +16,17 @@ struct HostsPreferencesView: View {
                     }
                 }
                 .listStyle(.sidebar)
-                .frame(minWidth: 220)
+                .frame(maxWidth: .infinity)
 
                 Divider()
 
                 HStack(spacing: 8) {
-                    Button {
-                        addHostPlaceholder()
-                    } label: {
-                        Image(systemName: "plus")
-                    }
-                    Button {
+                    Button("Add Host", systemImage: "plus", action: addHostPlaceholder)
+                        .labelStyle(.iconOnly)
+                    Button("Remove Host", systemImage: "minus") {
                         showingRemoveHostConfirmation = true
-                    } label: {
-                        Image(systemName: "minus")
                     }
+                    .labelStyle(.iconOnly)
                     .disabled(selection == nil)
                     .confirmationDialog(
                         "Remove this host and all its tunnels?",
@@ -40,9 +36,10 @@ struct HostsPreferencesView: View {
                         Button("Remove", role: .destructive) {
                             if let selection {
                                 let id = selection
-                                self.selection = nil
                                 Task {
-                                    await manager.removeHost(id: id)
+                                    if await manager.removeHost(id: id) {
+                                        self.selection = nil
+                                    }
                                 }
                             }
                         }
@@ -51,12 +48,11 @@ struct HostsPreferencesView: View {
                 }
                 .padding(8)
             }
-            .frame(minWidth: 220)
+            .frame(minWidth: 220, idealWidth: 260, maxWidth: 320)
 
             if let selection,
                let host = manager.hostProfile(id: selection) {
                 HostDetailPane(hostId: host.id)
-                    .id(host.id)
             } else {
                 VStack {
                     Text("Select a host to edit")
@@ -102,9 +98,11 @@ struct HostsPreferencesView: View {
 
 private struct HostDetailPane: View {
     @EnvironmentObject private var manager: TunnelManager
+    @Environment(\.openWindow) private var openWindow
     let hostId: UUID
 
     @State private var aliasDraft = ""
+    @State private var respectsConfigForwardings = false
     @State private var showingAddTunnel = false
     @State private var editingTunnel: TunnelEditContext?
     @State private var selectedTunnelId: UUID?
@@ -114,7 +112,7 @@ private struct HostDetailPane: View {
         VStack(alignment: .leading, spacing: 16) {
             Text(host.alias)
                 .font(.title2)
-                .fontWeight(.semibold)
+                .bold()
 
             GroupBox("Host") {
                 LabeledContent("Alias") {
@@ -137,28 +135,19 @@ private struct HostDetailPane: View {
                             }
                         }
                         .buttonStyle(.bordered)
+                        Button("Details...") {
+                            openWindow(id: "host-details", value: hostId)
+                        }
                     }
                 }
                 .padding(.top, 4)
 
-                HStack(alignment: .firstTextBaseline, spacing: 12) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Respect SSH config forwardings")
-                        Text("Use LocalForward/RemoteForward/DynamicForward from ~/.ssh/config for this host.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                    Spacer()
-                    Toggle("", isOn: Binding(
-                        get: { host.respectsConfigForwardings },
-                        set: { newValue in
-                            Task {
-                                await manager.updateHostForwardings(hostId: hostId, respectsConfigForwardings: newValue)
-                            }
-                        }
-                    ))
-                    .toggleStyle(.switch)
-                    .labelsHidden()
+                VStack(alignment: .leading, spacing: 4) {
+                    Toggle("Respect SSH config forwardings", isOn: $respectsConfigForwardings)
+                        .toggleStyle(.switch)
+                    Text("Use LocalForward/RemoteForward/DynamicForward from ~/.ssh/config for this host.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.top, 8)
@@ -197,23 +186,23 @@ private struct HostDetailPane: View {
                                 manager.toggleTunnel(hostId: hostId, tunnelId: tunnel.id)
                             }
                         }
-                        .disabled(selectedTunnel == nil)
+                        .disabled(selectedTunnel == nil || selectedTunnelIsBusy)
                         Button("Duplicate") {
                             if let tunnel = selectedTunnel {
                                 manager.duplicateTunnel(hostId: hostId, tunnelId: tunnel.id)
                             }
                         }
-                        .disabled(selectedTunnel == nil)
+                        .disabled(selectedTunnel == nil || selectedTunnelIsBusy)
                         Button("Edit...") {
                             if let tunnel = selectedTunnel {
                                 editingTunnel = TunnelEditContext(hostId: hostId, tunnel: tunnel)
                             }
                         }
-                        .disabled(selectedTunnel == nil)
+                        .disabled(selectedTunnel == nil || selectedTunnelIsBusy)
                         Button("Remove") {
                             showingRemoveTunnelConfirmation = true
                         }
-                        .disabled(selectedTunnel == nil)
+                        .disabled(selectedTunnel == nil || selectedTunnelIsBusy)
                         .confirmationDialog(
                             "Remove this tunnel?",
                             isPresented: $showingRemoveTunnelConfirmation,
@@ -238,13 +227,22 @@ private struct HostDetailPane: View {
         .padding(16)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .onAppear {
-            aliasDraft = host.alias
-            if selectedTunnelId == nil {
-                selectedTunnelId = host.tunnels.first?.id
-            }
+            resetDrafts()
+        }
+        .onChange(of: hostId) { _, _ in
+            resetDrafts()
         }
         .onChange(of: host.alias) { _, newValue in
             aliasDraft = newValue
+        }
+        .onChange(of: respectsConfigForwardings) { _, newValue in
+            guard newValue != host.respectsConfigForwardings else { return }
+            Task {
+                await manager.updateHostForwardings(hostId: hostId, respectsConfigForwardings: newValue)
+            }
+        }
+        .onChange(of: host.respectsConfigForwardings) { _, newValue in
+            respectsConfigForwardings = newValue
         }
         .onChange(of: host.tunnels) { _, newValue in
             if selectedTunnelId == nil {
@@ -268,6 +266,17 @@ private struct HostDetailPane: View {
     private var selectedTunnel: TunnelSpec? {
         guard let selectedTunnelId else { return nil }
         return host.tunnels.first { $0.id == selectedTunnelId }
+    }
+
+    private func resetDrafts() {
+        aliasDraft = host.alias
+        respectsConfigForwardings = host.respectsConfigForwardings
+        selectedTunnelId = host.tunnels.first?.id
+    }
+
+    private var selectedTunnelIsBusy: Bool {
+        guard let selectedTunnel else { return false }
+        return manager.isTunnelOperationInProgress(selectedTunnel.id)
     }
 
     private var startStopTitle: String {

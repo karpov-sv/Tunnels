@@ -18,6 +18,7 @@ final class TunnelManager: ObservableObject {
     @Published private(set) var reconnectingHosts: Set<UUID> = []
     @Published private(set) var reconnectingTunnelsByHost: [UUID: Set<UUID>] = [:]
     @Published private(set) var portsInUse: Set<Int> = []
+    @Published private(set) var tunnelOperationsInProgress: Set<UUID> = []
     @Published var logNotificationsEnabled: Bool {
         didSet {
             persistLogNotificationsEnabled()
@@ -186,7 +187,7 @@ final class TunnelManager: ObservableObject {
             logError("Host alias \(trimmed) already exists")
             return
         }
-        await disconnectHost(host: host)
+        guard await disconnectHost(host: host) else { return }
         updateHost(hostId: hostId) { host in
             host.alias = trimmed
             host.tunnels = host.tunnels.map { tunnel in
@@ -205,19 +206,20 @@ final class TunnelManager: ObservableObject {
             host.respectsConfigForwardings = respectsConfigForwardings
         }
         if runtimeStates[hostId]?.isMasterRunning == true {
-            await disconnectHost(host: host)
+            _ = await disconnectHost(host: host)
         }
         logInfo("Updated config forwardings for \(host.alias): \(respectsConfigForwardings ? "enabled" : "disabled")")
     }
 
-    func removeHost(id: UUID) async {
-        guard let host = hostProfile(id: id) else { return }
-        await disconnectHost(host: host)
+    func removeHost(id: UUID) async -> Bool {
+        guard let host = hostProfile(id: id) else { return false }
+        guard await disconnectHost(host: host) else { return false }
         hostProfiles.removeAll { $0.id == id }
         runtimeStates[id] = nil
         persist()
         refreshPortsInUse()
         logInfo("Removed host \(host.alias)")
+        return true
     }
 
     func addTunnel(hostId: UUID, spec: TunnelSpec) {
@@ -230,12 +232,17 @@ final class TunnelManager: ObservableObject {
         }
     }
 
-    func updateTunnel(hostId: UUID, tunnelId: UUID, updated: TunnelSpec) {
+    func updateTunnel(hostId: UUID, tunnelId: UUID, updated: TunnelSpec) async -> Bool {
         guard let host = hostProfile(id: hostId),
-              let existing = host.tunnels.first(where: { $0.id == tunnelId }) else { return }
+              let existing = host.tunnels.first(where: { $0.id == tunnelId }) else { return false }
+        guard beginTunnelOperation(tunnelId) else { return false }
+        defer { endTunnelOperation(tunnelId) }
+
         if existing.isActive {
-            Task {
-                await stopTunnel(host: host, tunnel: existing)
+            let stopped = await stopTunnel(host: host, tunnel: existing)
+            guard stopped else {
+                logError("Could not update tunnel \(existing.displaySummary) because it could not be stopped.")
+                return false
             }
         }
         updateHost(hostId: hostId) { host in
@@ -248,6 +255,7 @@ final class TunnelManager: ObservableObject {
         }
         clearTunnelError(tunnelId)
         logInfo("Updated tunnel \(existing.displaySummary) for \(host.alias)")
+        return true
     }
 
     func duplicateTunnel(hostId: UUID, tunnelId: UUID) {
@@ -272,8 +280,10 @@ final class TunnelManager: ObservableObject {
     func removeTunnel(hostId: UUID, tunnelId: UUID) async {
         guard let host = hostProfile(id: hostId),
               let tunnel = host.tunnels.first(where: { $0.id == tunnelId }) else { return }
+        guard beginTunnelOperation(tunnelId) else { return }
+        defer { endTunnelOperation(tunnelId) }
         if tunnel.isActive {
-            await stopTunnel(host: host, tunnel: tunnel)
+            guard await stopTunnel(host: host, tunnel: tunnel) else { return }
         }
         updateHost(hostId: hostId) { host in
             host.tunnels.removeAll { $0.id == tunnelId }
@@ -285,7 +295,9 @@ final class TunnelManager: ObservableObject {
     func toggleTunnel(hostId: UUID, tunnelId: UUID) {
         guard let host = hostProfile(id: hostId),
               let tunnel = host.tunnels.first(where: { $0.id == tunnelId }) else { return }
+        guard beginTunnelOperation(tunnelId) else { return }
         Task {
+            defer { endTunnelOperation(tunnelId) }
             if shouldStopTunnel(hostId: hostId, tunnelId: tunnelId) {
                 await stopTunnel(host: host, tunnel: tunnel)
             } else {
@@ -294,9 +306,10 @@ final class TunnelManager: ObservableObject {
         }
     }
 
-    func disconnectHost(id: UUID) async {
-        guard let host = hostProfile(id: id) else { return }
-        await disconnectHost(host: host)
+    @discardableResult
+    func disconnectHost(id: UUID) async -> Bool {
+        guard let host = hostProfile(id: id) else { return false }
+        return await disconnectHost(host: host)
     }
 
     func shutdownAll() async {
@@ -316,6 +329,10 @@ final class TunnelManager: ObservableObject {
 
     func isTunnelReconnecting(hostId: UUID, tunnelId: UUID) -> Bool {
         reconnectingTunnelsByHost[hostId]?.contains(tunnelId) == true
+    }
+
+    func isTunnelOperationInProgress(_ tunnelId: UUID) -> Bool {
+        tunnelOperationsInProgress.contains(tunnelId)
     }
 
     func shouldStopTunnel(hostId: UUID, tunnelId: UUID) -> Bool {
@@ -378,6 +395,8 @@ final class TunnelManager: ObservableObject {
         guard let host = hostProfile(id: hostId) else { return }
         logInfo("Starting all tunnels for \(host.alias)")
         for tunnel in host.tunnels where !tunnel.isActive {
+            guard beginTunnelOperation(tunnel.id) else { continue }
+            defer { endTunnelOperation(tunnel.id) }
             clearTunnelError(tunnel.id)
             await startTunnel(host: host, tunnel: tunnel)
         }
@@ -387,6 +406,8 @@ final class TunnelManager: ObservableObject {
         guard let host = hostProfile(id: hostId) else { return }
         logInfo("Stopping all tunnels for \(host.alias)")
         for tunnel in host.tunnels where tunnel.isActive {
+            guard beginTunnelOperation(tunnel.id) else { continue }
+            defer { endTunnelOperation(tunnel.id) }
             await stopTunnel(host: host, tunnel: tunnel)
         }
     }
@@ -401,20 +422,18 @@ final class TunnelManager: ObservableObject {
     }
 
     private func startTunnel(host: HostProfile, tunnel: TunnelSpec) async {
+        if let validationError = tunnelValidationError(tunnel) {
+            logError("Cannot start invalid tunnel \(tunnel.displaySummary): \(validationError)")
+            markTunnelError(tunnel.id)
+            return
+        }
         guard await ensureMaster(for: host) else { return }
         logInfo("Starting tunnel \(tunnel.displaySummary) for \(host.alias)")
         if tunnel.type != .remote {
             let port = tunnel.localPort
             if !isLocalPortAvailable(port) {
-                let state = ensureRuntimeState(for: host)
-                let cancelArgs = ["-S", state.controlSocketPath, "-O", "cancel"]
-                    + tunnelArguments(for: tunnel)
-                    + [host.alias]
-                _ = await runSSH(args: cancelArgs)
-            }
-
-            if !isLocalPortAvailable(port) {
-                logInfo("Local port \(port) is already in use. Skipping forward.")
+                logError("Local port \(port) is already in use. Skipping tunnel \(tunnel.displaySummary).")
+                markTunnelError(tunnel.id)
                 refreshPortsInUse()
                 return
             }
@@ -429,19 +448,14 @@ final class TunnelManager: ObservableObject {
             clearTunnelError(tunnel.id)
             logInfo("Started tunnel \(tunnel.displaySummary) for \(host.alias)")
         } else {
-            if tunnel.type != .remote && !isLocalPortAvailable(tunnel.localPort) {
-                setTunnelActive(hostId: host.id, tunnelId: tunnel.id, active: true)
-                clearTunnelError(tunnel.id)
-                logInfo("Tunnel \(tunnel.displaySummary) appears active despite ssh error; port \(tunnel.localPort) is in use.")
-            } else {
-                logError(failureMessage(action: "Start tunnel \(tunnel.displaySummary)", result: result))
-                markTunnelError(tunnel.id)
-            }
+            logError(failureMessage(action: "Start tunnel \(tunnel.displaySummary)", result: result))
+            markTunnelError(tunnel.id)
         }
         refreshPortsInUse()
     }
 
-    private func stopTunnel(host: HostProfile, tunnel: TunnelSpec) async {
+    @discardableResult
+    private func stopTunnel(host: HostProfile, tunnel: TunnelSpec) async -> Bool {
         logInfo("Stopping tunnel \(tunnel.displaySummary) for \(host.alias)")
         let state = ensureRuntimeState(for: host)
         let args = ["-S", state.controlSocketPath, "-O", "cancel"]
@@ -455,11 +469,14 @@ final class TunnelManager: ObservableObject {
         } else {
             logError(failureMessage(action: "Stop tunnel \(tunnel.displaySummary)", result: result))
             markTunnelError(tunnel.id)
+            refreshPortsInUse()
+            return false
         }
         if !hasActiveTunnels(hostId: host.id) {
             await disconnectHost(id: host.id)
         }
         refreshPortsInUse()
+        return true
     }
 
     private func ensureMaster(for host: HostProfile) async -> Bool {
@@ -538,16 +555,31 @@ final class TunnelManager: ObservableObject {
         }.value
     }
 
-    private func disconnectHost(host: HostProfile) async {
+    private func disconnectHost(host: HostProfile) async -> Bool {
         let socketPath = controlSocketManager.socketPath(for: host.alias)
+        let state = runtimeStateSnapshot(for: host)
+        guard state.isMasterRunning || fileManager.fileExists(atPath: socketPath) else {
+            clearHostConnectionState(hostId: host.id, tunnelIds: host.tunnels.map(\.id))
+            return true
+        }
+
         logInfo("Disconnecting host \(host.alias)")
         let result = await runSSH(args: ["-S", socketPath, "-O", "exit", host.alias])
-        if !result.success {
-            logError(failureMessage(action: "Disconnect host \(host.alias)", result: result))
-        } else {
+        if result.success {
             logInfo("Disconnected host \(host.alias)")
+            clearHostConnectionState(hostId: host.id, tunnelIds: host.tunnels.map(\.id))
+            return true
         }
-        clearHostConnectionState(hostId: host.id, tunnelIds: host.tunnels.map(\.id))
+
+        let check = await runSSH(args: ["-S", socketPath, "-O", "check", host.alias])
+        if !check.success,
+           (!fileManager.fileExists(atPath: socketPath) || isLikelyStaleSocketFailure(check)) {
+            clearHostConnectionState(hostId: host.id, tunnelIds: host.tunnels.map(\.id))
+            return true
+        }
+
+        logError(failureMessage(action: "Disconnect host \(host.alias)", result: result))
+        return false
     }
 
     private func pollStatusLoop() async {
@@ -644,7 +676,16 @@ final class TunnelManager: ObservableObject {
             let data = try Data(contentsOf: configURL)
             hostProfiles = try JSONDecoder().decode([HostProfile].self, from: data)
         } catch {
-            logError("Failed to load config: \(error)")
+            let loadError = error
+            let backupURL = configURL
+                .deletingLastPathComponent()
+                .appendingPathComponent("config.invalid-\(Int(Date.now.timeIntervalSince1970)).json")
+            do {
+                try fileManager.moveItem(at: configURL, to: backupURL)
+                logError("Failed to load config: \(loadError). Saved the invalid file as \(backupURL.lastPathComponent).")
+            } catch let backupError {
+                logError("Failed to load config: \(loadError). The invalid file could not be backed up: \(backupError).")
+            }
             hostProfiles = []
         }
     }
@@ -878,6 +919,20 @@ final class TunnelManager: ObservableObject {
         tunnelErrors.remove(tunnelId)
     }
 
+    func clearLastError() {
+        lastError = nil
+    }
+
+    private func beginTunnelOperation(_ tunnelId: UUID) -> Bool {
+        guard !tunnelOperationsInProgress.contains(tunnelId) else { return false }
+        tunnelOperationsInProgress.insert(tunnelId)
+        return true
+    }
+
+    private func endTunnelOperation(_ tunnelId: UUID) {
+        tunnelOperationsInProgress.remove(tunnelId)
+    }
+
     private func clearHostConnectionState(hostId: UUID, tunnelIds: [UUID]) {
         updateHost(hostId: hostId) { host in
             host.tunnels = host.tunnels.map { tunnel in
@@ -896,7 +951,7 @@ final class TunnelManager: ObservableObject {
         var ports = Set<Int>()
         for host in hostProfiles {
             for tunnel in host.tunnels where !tunnel.isActive && tunnel.type != .remote {
-                if !isLocalPortAvailable(tunnel.localPort) {
+                if isValidPort(tunnel.localPort), !isLocalPortAvailable(tunnel.localPort) {
                     ports.insert(tunnel.localPort)
                 }
             }
@@ -905,6 +960,7 @@ final class TunnelManager: ObservableObject {
     }
 
     func isLocalPortAvailable(_ port: Int) -> Bool {
+        guard isValidPort(port) else { return false }
         let socketFD = socket(AF_INET, SOCK_STREAM, 0)
         guard socketFD >= 0 else { return true }
         defer { close(socketFD) }
@@ -920,6 +976,24 @@ final class TunnelManager: ObservableObject {
             }
         }
         return result == 0
+    }
+
+    private func tunnelValidationError(_ tunnel: TunnelSpec) -> String? {
+        guard isValidPort(tunnel.localPort) else {
+            return "local port must be between 1 and 65535"
+        }
+        guard tunnel.type != .dynamic else { return nil }
+        guard let remoteHost = tunnel.remoteHost?.trimmingCharacters(in: .whitespacesAndNewlines), !remoteHost.isEmpty else {
+            return "remote host is required"
+        }
+        guard let remotePort = tunnel.remotePort, isValidPort(remotePort) else {
+            return "remote port must be between 1 and 65535"
+        }
+        return nil
+    }
+
+    private func isValidPort(_ port: Int) -> Bool {
+        (1...65535).contains(port)
     }
 }
 

@@ -24,6 +24,9 @@ struct LogTextView: NSViewRepresentable {
 
     func updateNSView(_ nsView: NSScrollView, context: Context) {
         guard let textView = nsView.documentView as? NSTextView else { return }
+        let visibleRect = nsView.contentView.documentVisibleRect
+        let wasAtEnd = NSMaxY(visibleRect) >= NSMaxY(textView.bounds) - 1
+        let selectedRange = textView.selectedRange()
         let attributed = NSMutableAttributedString()
         let font = NSFont.monospacedSystemFont(ofSize: NSFont.smallSystemFontSize, weight: .regular)
 
@@ -40,6 +43,16 @@ struct LogTextView: NSViewRepresentable {
         }
 
         textView.textStorage?.setAttributedString(attributed)
-        textView.scrollToEndOfDocument(nil)
+        if selectedRange.location != NSNotFound {
+            let location = min(selectedRange.location, attributed.length)
+            let length = min(selectedRange.length, attributed.length - location)
+            textView.setSelectedRange(NSRange(location: location, length: length))
+        }
+        if wasAtEnd {
+            textView.scrollToEndOfDocument(nil)
+        } else {
+            nsView.contentView.scroll(to: visibleRect.origin)
+            nsView.reflectScrolledClipView(nsView.contentView)
+        }
     }
 }
