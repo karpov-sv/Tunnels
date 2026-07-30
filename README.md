@@ -12,18 +12,18 @@ Key capabilities:
 Tunnels delegates all SSH behavior to `/usr/bin/ssh` and uses ControlMaster sockets to manage a single master connection per host. The master is started on demand and tunnels are added/removed without reconnecting:
 
 ```bash
-ssh -MNf <host-alias> \
+ssh -MNf <hostname> \
   -o ControlMaster=yes \
   -o ControlPersist=600 \
   -o ControlPath=<socket-path> \
   -o ExitOnForwardFailure=yes
 
-ssh -S <socket-path> -O forward -L 15432:db.internal:5432 <host-alias>
-ssh -S <socket-path> -O cancel  -L 15432:db.internal:5432 <host-alias>
-ssh -S <socket-path> -O exit <host-alias>
+ssh -S <socket-path> -O forward -L 15432:db.internal:5432 <hostname>
+ssh -S <socket-path> -O cancel  -L 15432:db.internal:5432 <hostname>
+ssh -S <socket-path> -O exit <hostname>
 ```
 
-The app never parses `ssh_config` directly; it uses `ssh -G <host-alias>` when inspecting host details. Hosts can optionally honor config-defined forwardings (LocalForward/RemoteForward/DynamicForward), otherwise they are cleared on connect.
+The app never parses `ssh_config` directly; it uses `ssh -G <hostname>` when inspecting host details. Hosts can optionally honor config-defined forwardings (LocalForward/RemoteForward/DynamicForward), otherwise they are cleared on connect.
 
 ## Data & Storage
 - Host and tunnel configuration is stored as JSON in `~/Library/Application Support/Tunnels/config.json`.

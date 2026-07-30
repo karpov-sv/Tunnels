@@ -50,7 +50,6 @@ final class TunnelManager: ObservableObject {
             persistSSHBinaryPath()
         }
     }
-    @Published var lastError: String?
 
     private let sshPathKey = "sshBinaryPath"
     private let autoReconnectKey = "autoReconnectEnabled"
@@ -198,6 +197,23 @@ final class TunnelManager: ObservableObject {
         }
         runtimeStates[hostId] = nil
         logInfo("Updated host alias to \(trimmed)")
+    }
+
+    func updateHostHostname(hostId: UUID, hostname: String) async {
+        let trimmed = hostname.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        guard let host = hostProfile(id: hostId), host.hostname != trimmed else { return }
+        guard await disconnectHost(host: host) else { return }
+        updateHost(hostId: hostId) { host in
+            host.hostname = trimmed
+            host.tunnels = host.tunnels.map { tunnel in
+                var updated = tunnel
+                updated.isActive = false
+                return updated
+            }
+        }
+        runtimeStates[hostId] = nil
+        logInfo("Updated hostname for \(host.alias) to \(trimmed)")
     }
 
     func updateHostForwardings(hostId: UUID, respectsConfigForwardings: Bool) async {
@@ -386,6 +402,10 @@ final class TunnelManager: ObservableObject {
         logs.removeAll()
     }
 
+    func recordError(_ message: String) {
+        logError(message)
+    }
+
     func resetSSHBinaryPath() {
         sshBinaryPath = defaultSSHPath
         logInfo("Reset SSH binary to \(defaultSSHPath)")
@@ -414,7 +434,7 @@ final class TunnelManager: ObservableObject {
 
     func inspectConfig(for hostId: UUID) async -> ExecResult? {
         guard let host = hostProfile(id: hostId) else { return nil }
-        return await configInspector.inspect(alias: host.alias, sshPath: resolvedSSHPath)
+        return await configInspector.inspect(hostname: host.hostname, sshPath: resolvedSSHPath)
     }
 
     var controlSocketBasePath: String {
@@ -441,7 +461,7 @@ final class TunnelManager: ObservableObject {
         let state = ensureRuntimeState(for: host)
         let args = ["-S", state.controlSocketPath, "-O", "forward"]
             + tunnelArguments(for: tunnel)
-            + [host.alias]
+            + [host.hostname]
         let result = await runSSH(args: args)
         if result.success {
             setTunnelActive(hostId: host.id, tunnelId: tunnel.id, active: true)
@@ -460,7 +480,7 @@ final class TunnelManager: ObservableObject {
         let state = ensureRuntimeState(for: host)
         let args = ["-S", state.controlSocketPath, "-O", "cancel"]
             + tunnelArguments(for: tunnel)
-            + [host.alias]
+            + [host.hostname]
         let result = await runSSH(args: args)
         if result.success {
             setTunnelActive(hostId: host.id, tunnelId: tunnel.id, active: false)
@@ -481,7 +501,7 @@ final class TunnelManager: ObservableObject {
 
     private func ensureMaster(for host: HostProfile) async -> Bool {
         let state = ensureRuntimeState(for: host)
-        let check = await runSSH(args: ["-S", state.controlSocketPath, "-O", "check", host.alias])
+        let check = await runSSH(args: ["-S", state.controlSocketPath, "-O", "check", host.hostname])
         if check.success {
             runtimeStates[host.id]?.isMasterRunning = true
             return true
@@ -503,7 +523,7 @@ final class TunnelManager: ObservableObject {
             "ControlPath=\(escapeForSSHOptionValue(state.controlSocketPath))",
             "-o",
             "ExitOnForwardFailure=yes",
-            host.alias
+            host.hostname
         ]
         let result = await runSSH(args: args)
         runtimeStates[host.id]?.isMasterRunning = result.success
@@ -564,14 +584,14 @@ final class TunnelManager: ObservableObject {
         }
 
         logInfo("Disconnecting host \(host.alias)")
-        let result = await runSSH(args: ["-S", socketPath, "-O", "exit", host.alias])
+        let result = await runSSH(args: ["-S", socketPath, "-O", "exit", host.hostname])
         if result.success {
             logInfo("Disconnected host \(host.alias)")
             clearHostConnectionState(hostId: host.id, tunnelIds: host.tunnels.map(\.id))
             return true
         }
 
-        let check = await runSSH(args: ["-S", socketPath, "-O", "check", host.alias])
+        let check = await runSSH(args: ["-S", socketPath, "-O", "check", host.hostname])
         if !check.success,
            (!fileManager.fileExists(atPath: socketPath) || isLikelyStaleSocketFailure(check)) {
             clearHostConnectionState(hostId: host.id, tunnelIds: host.tunnels.map(\.id))
@@ -594,7 +614,7 @@ final class TunnelManager: ObservableObject {
         for host in hostProfiles {
             let state = ensureRuntimeState(for: host)
             let wasRunning = state.isMasterRunning
-            let result = await runSSH(args: ["-S", state.controlSocketPath, "-O", "check", host.alias])
+            let result = await runSSH(args: ["-S", state.controlSocketPath, "-O", "check", host.hostname])
             let isRunning = result.success
             runtimeStates[host.id]?.isMasterRunning = isRunning
             if wasRunning && !isRunning {
@@ -625,10 +645,10 @@ final class TunnelManager: ObservableObject {
             let socketPath = controlSocketManager.socketPath(for: host.alias)
             guard fileManager.fileExists(atPath: socketPath) else { continue }
 
-            let check = await runSSH(args: ["-S", socketPath, "-O", "check", host.alias])
+            let check = await runSSH(args: ["-S", socketPath, "-O", "check", host.hostname])
             if check.success {
                 logInfo("Found orphaned master for \(host.alias), disconnecting")
-                let exit = await runSSH(args: ["-S", socketPath, "-O", "exit", host.alias])
+                let exit = await runSSH(args: ["-S", socketPath, "-O", "exit", host.hostname])
                 if !exit.success {
                     logError("Failed to disconnect orphaned master for \(host.alias): \(exit.combinedOutput)")
                 } else {
@@ -704,7 +724,6 @@ final class TunnelManager: ObservableObject {
     }
 
     private func logError(_ message: String) {
-        lastError = message
         appendLog(LogEntry(level: .error, message: message))
     }
 
@@ -917,10 +936,6 @@ final class TunnelManager: ObservableObject {
 
     private func clearTunnelError(_ tunnelId: UUID) {
         tunnelErrors.remove(tunnelId)
-    }
-
-    func clearLastError() {
-        lastError = nil
     }
 
     private func beginTunnelOperation(_ tunnelId: UUID) -> Bool {

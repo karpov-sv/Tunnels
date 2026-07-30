@@ -102,6 +102,7 @@ private struct HostDetailPane: View {
     let hostId: UUID
 
     @State private var aliasDraft = ""
+    @State private var hostnameDraft = ""
     @State private var respectsConfigForwardings = false
     @State private var showingAddTunnel = false
     @State private var editingTunnel: TunnelEditContext?
@@ -125,6 +126,20 @@ private struct HostDetailPane: View {
                             }
                         }
                         .disabled(aliasDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    }
+                }
+                .padding(.top, 4)
+
+                LabeledContent("Hostname") {
+                    HStack(spacing: 8) {
+                        TextField("Hostname", text: $hostnameDraft)
+                            .frame(minWidth: 240)
+                        Button("Save") {
+                            Task {
+                                await manager.updateHostHostname(hostId: hostId, hostname: hostnameDraft)
+                            }
+                        }
+                        .disabled(hostnameDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                         Button(connectionTitle) {
                             Task {
                                 if shouldDisconnectHost {
@@ -235,6 +250,9 @@ private struct HostDetailPane: View {
         .onChange(of: host.alias) { _, newValue in
             aliasDraft = newValue
         }
+        .onChange(of: host.hostname) { _, newValue in
+            hostnameDraft = newValue
+        }
         .onChange(of: respectsConfigForwardings) { _, newValue in
             guard newValue != host.respectsConfigForwardings else { return }
             Task {
@@ -270,6 +288,7 @@ private struct HostDetailPane: View {
 
     private func resetDrafts() {
         aliasDraft = host.alias
+        hostnameDraft = host.hostname
         respectsConfigForwardings = host.respectsConfigForwardings
         selectedTunnelId = host.tunnels.first?.id
     }

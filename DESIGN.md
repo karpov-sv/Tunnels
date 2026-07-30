@@ -56,10 +56,10 @@ TunnelManager (ObservableObject)
 
 ### Use `/usr/bin/ssh` with ControlMaster
 
-Each host alias has **one master connection**:
+Each host profile has **one master connection** to its hostname:
 
 ```bash
-ssh -MNf <host-alias> \
+ssh -MNf <hostname> \
   -o ControlMaster=yes \
   -o ControlPersist=600 \
   -o ControlPath=<socket-path> \
@@ -69,9 +69,9 @@ ssh -MNf <host-alias> \
 Additional tunnels are added/removed dynamically:
 
 ```bash
-ssh -S <socket-path> -O forward -L 15432:db.internal:5432 <host-alias>
-ssh -S <socket-path> -O cancel  -L 15432:db.internal:5432 <host-alias>
-ssh -S <socket-path> -O exit <host-alias>
+ssh -S <socket-path> -O forward -L 15432:db.internal:5432 <hostname>
+ssh -S <socket-path> -O cancel  -L 15432:db.internal:5432 <hostname>
+ssh -S <socket-path> -O exit <hostname>
 ```
 
 **Why this works**
@@ -89,7 +89,8 @@ ssh -S <socket-path> -O exit <host-alias>
 ```swift
 struct HostProfile: Identifiable, Codable {
     let id: UUID
-    let alias: String          // ssh host alias
+    var alias: String          // display name for the host profile
+    var hostname: String       // SSH destination
     var tunnels: [TunnelSpec]
 }
 ```

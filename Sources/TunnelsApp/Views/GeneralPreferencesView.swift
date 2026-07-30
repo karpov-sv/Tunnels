@@ -177,7 +177,7 @@ struct GeneralPreferencesView: View {
                     manager.sshBinaryPath = url.path
                 }
             case .failure:
-                manager.lastError = "Failed to select SSH binary."
+                manager.recordError("Failed to select SSH binary.")
             }
         }
     }
