@@ -31,7 +31,7 @@ struct HostDetailsView: View {
             }
         }
         .padding(20)
-        .frame(width: 520, height: 360)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         .task(id: hostId) {
             await loadDetails()
         }

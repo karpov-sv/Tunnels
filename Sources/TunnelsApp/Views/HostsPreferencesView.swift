@@ -48,7 +48,7 @@ struct HostsPreferencesView: View {
                 }
                 .padding(8)
             }
-            .frame(minWidth: 220, idealWidth: 260, maxWidth: 320)
+            .frame(minWidth: 120, idealWidth: 200, maxWidth: 320)
 
             if let selection,
                let host = manager.hostProfile(id: selection) {
@@ -189,7 +189,7 @@ private struct HostDetailPane: View {
                             }
                             .width(min: 80, ideal: 100)
                         }
-                        .frame(maxWidth: .infinity, minHeight: 240)
+                        .frame(maxWidth: .infinity, minHeight: 200)
                     }
 
                     HStack {
