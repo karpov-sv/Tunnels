@@ -459,14 +459,18 @@ final class TunnelManager: ObservableObject {
             }
         }
         let state = ensureRuntimeState(for: host)
-        let args = ["-S", state.controlSocketPath, "-O", "forward"]
+        let args = ["-F", "/dev/null", "-S", state.controlSocketPath, "-O", "forward"]
             + tunnelArguments(for: tunnel)
             + [host.hostname]
         let result = await runSSH(args: args)
-        if result.success {
+        if result.success || forwardingAppearsActive(tunnel, despite: result) {
             setTunnelActive(hostId: host.id, tunnelId: tunnel.id, active: true)
             clearTunnelError(tunnel.id)
-            logInfo("Started tunnel \(tunnel.displaySummary) for \(host.alias)")
+            if result.success {
+                logInfo("Started tunnel \(tunnel.displaySummary) for \(host.alias)")
+            } else {
+                logInfo("Tunnel \(tunnel.displaySummary) for \(host.alias) is active despite SSH reporting a forwarding error.")
+            }
         } else {
             logError(failureMessage(action: "Start tunnel \(tunnel.displaySummary)", result: result))
             markTunnelError(tunnel.id)
@@ -478,7 +482,7 @@ final class TunnelManager: ObservableObject {
     private func stopTunnel(host: HostProfile, tunnel: TunnelSpec) async -> Bool {
         logInfo("Stopping tunnel \(tunnel.displaySummary) for \(host.alias)")
         let state = ensureRuntimeState(for: host)
-        let args = ["-S", state.controlSocketPath, "-O", "cancel"]
+        let args = ["-F", "/dev/null", "-S", state.controlSocketPath, "-O", "cancel"]
             + tunnelArguments(for: tunnel)
             + [host.hostname]
         let result = await runSSH(args: args)
@@ -548,6 +552,13 @@ final class TunnelManager: ObservableObject {
             let remotePort = tunnel.remotePort.map(String.init) ?? ""
             return ["-R", "\(remotePort):\(host):\(tunnel.localPort)"]
         }
+    }
+
+    private func forwardingAppearsActive(_ tunnel: TunnelSpec, despite result: ExecResult) -> Bool {
+        guard !result.success,
+              tunnel.type != .remote,
+              result.combinedOutput.contains("mux_client_forward") else { return false }
+        return !isLocalPortAvailable(tunnel.localPort)
     }
 
     private func hasActiveTunnels(hostId: UUID) -> Bool {
